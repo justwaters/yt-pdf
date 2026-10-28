@@ -99,7 +99,7 @@ def run(url: str, dark: bool, output: Path | None) -> None:
             guide, frames, title=title, video_id=video_id, source_url=url, theme=theme,
             channel=info.channel if info else None, duration=duration,
         )
-        pdf.render_pdf(doc, output)
+        pdf.render_pdf(doc, output, log=console.print)
     console.print(f"[bold green]Saved[/] {output}")
 
 

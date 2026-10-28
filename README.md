@@ -7,9 +7,10 @@ Turn a YouTube video into a styled PDF reference guide: executive TL;DR, cleaned
 Requires Python 3.10+ and `ffmpeg` on your PATH.
 
 ```sh
-pipx install .            # or: pip install -e .
-playwright install chromium
+brew install justwaters/tap/yt-pdf     # or: pipx install . / pip install -e .
 ```
+
+PDFs are printed by a browser. yt-pdf uses Playwright's headless Chromium if present, otherwise an installed Google Chrome or Microsoft Edge, and otherwise downloads the headless shell (about 100 MB, once) on first run.
 
 ## Use
 

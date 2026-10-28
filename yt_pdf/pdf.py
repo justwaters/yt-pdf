@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import html
 import re
+import subprocess
+import sys
+from collections.abc import Callable
 from datetime import date
 from pathlib import Path
 
@@ -193,33 +196,68 @@ def build_html(
     )
 
 
-def render_pdf(html_doc: str, output: Path) -> None:
+def _is_missing_browser(exc: Exception) -> bool:
+    text = str(exc)
+    return "Executable doesn't exist" in text or "is not found at" in text or "playwright install" in text
+
+
+def _install_headless_shell(log: Callable[[str], None]) -> None:
+    """Download just the headless shell (~100 MB), not the full Chromium (~370 MB more)."""
+    log("Downloading Chromium headless shell (~100 MB, one time)…")
+    cmd = [sys.executable, "-m", "playwright", "install", "--only-shell", "chromium"]
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=900)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise YtPdfError(f"Could not download Chromium ({exc}). Run: {' '.join(cmd)}") from exc
+    if proc.returncode != 0:
+        tail = (proc.stderr or proc.stdout).strip().splitlines()[-3:]
+        raise YtPdfError("Chromium download failed:\n" + "\n".join(tail) + f"\nRetry with: {' '.join(cmd)}")
+
+
+def _print_with(pw, html_doc: str, output: Path, channel: str | None) -> None:
+    browser = pw.chromium.launch(channel=channel) if channel else pw.chromium.launch()
+    try:
+        context = browser.new_context(java_script_enabled=False)
+        # Everything is inline; refuse any network fetch the document attempts.
+        context.route("**/*", lambda route: route.abort())
+        page = context.new_page()
+        page.set_content(html_doc, wait_until="load")
+        page.pdf(path=str(output), format="A4", prefer_css_page_size=True, print_background=True)
+    finally:
+        browser.close()
+
+
+def render_pdf(html_doc: str, output: Path, log: Callable[[str], None] | None = None) -> None:
+    """Print the HTML to PDF with the first browser that works.
+
+    Order: Playwright's headless shell if present, then an installed Chrome or Edge (no download),
+    and only then a one-time download of the headless shell.
+    """
     from playwright.sync_api import Error as PlaywrightError
     from playwright.sync_api import sync_playwright
 
+    log = log or (lambda msg: print(msg, file=sys.stderr))
     output.parent.mkdir(parents=True, exist_ok=True)
-    try:
+
+    def attempt(channels: tuple[str | None, ...]) -> bool:
         with sync_playwright() as pw:
-            browser = pw.chromium.launch()
-            try:
-                context = browser.new_context(java_script_enabled=False)
-                # Everything is inline; refuse any network fetch the document attempts.
-                context.route("**/*", lambda route: route.abort())
-                page = context.new_page()
-                page.set_content(html_doc, wait_until="load")
-                page.pdf(
-                    path=str(output),
-                    format="A4",
-                    prefer_css_page_size=True,
-                    print_background=True,
-                )
-            finally:
-                browser.close()
+            for channel in channels:
+                try:
+                    _print_with(pw, html_doc, output, channel)
+                    return True
+                except PlaywrightError as exc:
+                    if not _is_missing_browser(exc):
+                        raise
+        return False
+
+    try:
+        if attempt((None, "chrome", "msedge")):
+            return
+        _install_headless_shell(log)
+        if attempt((None,)):
+            return
+        raise YtPdfError("No usable browser found even after installing Chromium.")
     except PlaywrightError as exc:
-        if "Executable doesn't exist" in str(exc) or "playwright install" in str(exc):
-            raise YtPdfError(
-                "Chromium is not installed for Playwright. Run: playwright install chromium"
-            ) from exc
         raise YtPdfError(f"PDF rendering failed: {exc}") from exc
     except OSError as exc:
         raise YtPdfError(f"Could not write {output}: {exc}") from exc

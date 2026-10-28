@@ -2,6 +2,8 @@
 
 Turn a YouTube video into a styled PDF reference guide: executive TL;DR, cleaned-up prose, headings, and inline screenshots.
 
+See sample output and install options at **https://justwaters.github.io/yt-pdf/**.
+
 ## Install
 
 Requires Python 3.10+ and `ffmpeg` on your PATH.

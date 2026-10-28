@@ -18,6 +18,14 @@ _YT_HOSTS = {"youtube.com", "www.youtube.com", "m.youtube.com", "music.youtube.c
 PREFERRED_LANGS = ["en", "en-US", "en-GB"]
 TRANSCRIPT_CHUNK_SECONDS = 20
 FRAME_MAX_WIDTH = 1280
+PROBE_FRAMES = 2
+# Video-only is enough for stills. Prefer a direct https file at 720p (the frames are scaled to 1280
+# wide anyway): ffmpeg seeks it with range requests in seconds, whereas the HLS playlists yt-dlp
+# otherwise favours time out when seeking into a long video.
+STREAM_FORMAT = (
+    "bestvideo[height<=720][protocol=https]/bestvideo[height<=1080][protocol=https]"
+    "/bestvideo[height<=1080]/best[height<=1080]/best"
+)
 
 
 @dataclass
@@ -125,8 +133,7 @@ def get_video_info(url: str, video_id: str) -> VideoInfo:
         "no_warnings": True,
         "skip_download": True,
         "noplaylist": True,
-        # Video-only is enough for stills; cap at 1080p to keep ffmpeg seeks quick.
-        "format": "bestvideo[height<=1080]/best[height<=1080]/best",
+        "format": STREAM_FORMAT,
     }
     try:
         with yt_dlp.YoutubeDL(opts) as ydl:
@@ -188,5 +195,20 @@ def grab_frames(
             on_done()
         return sec, result
 
+    # Probe the first couple of frames on their own. If the stream can't be read at all, give up now
+    # instead of waiting out a timeout for every remaining frame (20 frames took ~8 minutes before).
+    frames: dict[int, str] = {}
+    probed: set[int] = set()
+    for sec in timestamps[:PROBE_FRAMES]:
+        probed.add(sec)
+        _, uri = one(sec)
+        if uri:
+            frames[sec] = uri
+            break
+    if not frames:
+        return {}
+
+    rest = [sec for sec in timestamps if sec not in probed]
     with ThreadPoolExecutor(max_workers=workers) as pool:
-        return {sec: uri for sec, uri in pool.map(one, timestamps) if uri}
+        frames.update({sec: uri for sec, uri in pool.map(one, rest) if uri})
+    return frames

@@ -21,6 +21,8 @@ yt-pdf "https://www.youtube.com/watch?v=VIDEO_ID" [--dark] [--largeText] [-o out
 yt-pdf auth               # show provider/model status
 ```
 
+Each section heading and screenshot carries its video time in the left margin, linked to that moment on YouTube. Pages are numbered and carry a running title. The fonts (Source Serif 4 and IBM Plex, SIL Open Font License) ship with the package, so PDFs look the same on macOS and Linux.
+
 Text is a compact size by default; `--largeText` gives the larger size. `--dark` switches to the dark theme.
 
 Providers: OpenAI, Anthropic, OpenRouter, Nvidia NIM, Google Gemini. Config lives in `~/.config/yt-pdf/config.json`.

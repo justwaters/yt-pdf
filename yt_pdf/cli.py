@@ -95,7 +95,9 @@ def run(url: str, dark: bool, large_text: bool, output: Path | None) -> None:
             task = progress.add_task("frames", total=len(times))
             frames = video.grab_frames(info, times, on_done=lambda: progress.advance(task))
         console.print(f"[green]✓[/] Captured {len(frames)}/{len(times)} frames")
-        if len(frames) < len(times):
+        if not frames:
+            err.print("[yellow]Warning:[/] the video stream could not be read, so the PDF has no screenshots.")
+        elif len(frames) < len(times):
             err.print("[yellow]Warning:[/] some frames could not be read and were skipped.")
 
     with console.status("Rendering PDF…"):

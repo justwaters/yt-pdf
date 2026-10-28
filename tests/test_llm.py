@@ -48,3 +48,8 @@ def test_default_models_are_in_the_curated_lists():
 def test_openrouter_default_is_not_the_retired_model():
     assert config.PROVIDERS["openrouter"]["default_model"] != "anthropic/claude-3.7-sonnet"
     assert "anthropic/claude-3.7-sonnet" not in config.PROVIDERS["openrouter"]["models"]
+
+
+def test_prompt_asks_for_a_section_time_under_every_heading_and_for_screenshots():
+    assert "{{AT: <seconds>}}" in llm.SYSTEM_PROMPT
+    assert "{{SCREENSHOT: <seconds>}}" in llm.SYSTEM_PROMPT

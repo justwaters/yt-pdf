@@ -35,6 +35,9 @@ Body rules:
 - Rewrite conversational speech into tight, readable prose. Drop filler, greetings, sponsor reads and repetition.
 - Keep every technical detail, number, name and step. Do not invent facts that are not in the transcript.
 - Put commands and code in fenced code blocks with a language tag. Use tables for comparisons and bullet/numbered lists for steps.
+- Directly under every `##` heading, put a tag on its own line:
+  {{AT: <seconds>}}
+  <seconds> is when the video starts covering that section, from the transcript timestamps.
 - Where a visual would help (a slide, diagram, chart, code on screen, a demo), put a tag on its own line:
   {{SCREENSHOT: <seconds>}}
   <seconds> is an integer from the transcript timestamps, placed where the visual is being discussed.

@@ -8,6 +8,7 @@ from datetime import date
 from pathlib import Path
 
 import markdown
+import nh3
 
 from .errors import YtPdfError
 
@@ -117,8 +118,22 @@ def find_screenshot_times(body: str, duration: int | None, limit: int) -> list[i
     return seen[:limit]
 
 
+_ALLOWED_TAGS = {
+    "p", "br", "hr", "h1", "h2", "h3", "h4", "h5", "h6", "ul", "ol", "li", "strong", "em", "del",
+    "code", "pre", "blockquote", "table", "thead", "tbody", "tr", "th", "td", "a",
+}
+
+
 def _md(text: str) -> str:
-    return markdown.markdown(text, extensions=["fenced_code", "tables", "sane_lists"])
+    """Markdown -> HTML, with anything the LLM (or a poisoned transcript) smuggled in stripped
+    down to a small allowlist: no styles, no images, only http(s) links."""
+    raw = markdown.markdown(text, extensions=["fenced_code", "tables", "sane_lists"])
+    return nh3.clean(
+        raw,
+        tags=_ALLOWED_TAGS,
+        attributes={"a": {"href"}, "code": {"class"}},
+        url_schemes={"http", "https"},
+    )
 
 
 def build_html(
@@ -188,6 +203,8 @@ def render_pdf(html_doc: str, output: Path) -> None:
             browser = pw.chromium.launch()
             try:
                 context = browser.new_context(java_script_enabled=False)
+                # Everything is inline; refuse any network fetch the document attempts.
+                context.route("**/*", lambda route: route.abort())
                 page = context.new_page()
                 page.set_content(html_doc, wait_until="load")
                 page.pdf(

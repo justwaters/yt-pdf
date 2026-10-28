@@ -1,0 +1,272 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>yt-pdf: read a YouTube talk as a PDF guide</title>
+<meta name="description" content="yt-pdf turns a YouTube video into a PDF guide with a TL;DR, timed sections and screenshots of the slides that matter.">
+<meta property="og:type" content="website">
+<meta property="og:title" content="yt-pdf: read a YouTube talk as a PDF guide">
+<meta property="og:description" content="A TL;DR, clear sections, and the slides that matter, each linked to the moment it appears in the video.">
+<meta property="og:url" content="https://justwaters.github.io/yt-pdf/">
+<meta property="og:image" content="https://justwaters.github.io/yt-pdf/og.png">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230b0f19'/%3E%3Ccircle cx='16' cy='16' r='6.5' fill='%23d92d20'/%3E%3C/svg%3E">
+<link rel="preload" href="fonts/source-serif-4-400-normal.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="fonts/ibm-plex-sans-600-normal.woff2" as="font" type="font/woff2" crossorigin>
+<style>
+@font-face{font-family:"Source Serif 4";font-weight:400;font-style:normal;font-display:swap;src:url(fonts/source-serif-4-400-normal.woff2) format("woff2")}
+@font-face{font-family:"Source Serif 4";font-weight:400;font-style:italic;font-display:swap;src:url(fonts/source-serif-4-400-italic.woff2) format("woff2")}
+@font-face{font-family:"Source Serif 4";font-weight:600;font-style:normal;font-display:swap;src:url(fonts/source-serif-4-600-normal.woff2) format("woff2")}
+@font-face{font-family:"IBM Plex Sans";font-weight:400;font-style:normal;font-display:swap;src:url(fonts/ibm-plex-sans-400-normal.woff2) format("woff2")}
+@font-face{font-family:"IBM Plex Sans";font-weight:600;font-style:normal;font-display:swap;src:url(fonts/ibm-plex-sans-600-normal.woff2) format("woff2")}
+@font-face{font-family:"IBM Plex Mono";font-weight:400;font-style:normal;font-display:swap;src:url(fonts/ibm-plex-mono-400-normal.woff2) format("woff2")}
+
+:root{
+  --paper:#ffffff; --desk:#eef0f3; --ink:#101828; --muted:#5b6475; --rule:#d8dce4;
+  --rec:#d92d20; --rec-text:#b42318; --night:#0b0f19; --night-text:#e2e8f0;
+  --serif:"Source Serif 4","Iowan Old Style",Charter,Georgia,serif;
+  --sans:"IBM Plex Sans",-apple-system,"Segoe UI",Helvetica,Arial,sans-serif;
+  --mono:"IBM Plex Mono","SF Mono",Menlo,Consolas,monospace;
+  --gutter:168px; --measure:62ch;
+  --h1:clamp(2.5rem,5.4vw,4.25rem);
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth;-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--desk);color:var(--ink);font-family:var(--serif);font-size:1.1875rem;line-height:1.62;font-kerning:normal}
+a{color:var(--rec-text);text-decoration:none}
+a:hover{text-decoration:underline;text-underline-offset:.2em}
+:focus-visible{outline:3px solid var(--rec);outline-offset:3px;border-radius:2px}
+.skip{position:absolute;left:-999px;top:0;background:var(--ink);color:#fff;padding:.6rem 1rem;font-family:var(--sans);z-index:10}
+.skip:focus{left:0}
+h1,h2,h3{font-family:var(--sans);font-weight:600;line-height:1.15;margin:0;color:var(--ink)}
+p{margin:0 0 1em;max-width:var(--measure)}
+code,kbd{font-family:var(--mono);font-size:.86em}
+p code,li code{background:#e3e6ec;padding:.08em .35em;border-radius:3px}
+
+/* Layout: a left gutter (timecode in the hero, section nav below) and a content column. */
+.wrap{max-width:calc(var(--gutter) + 1040px);margin:0 auto;padding:0 24px}
+.row{display:grid;grid-template-columns:var(--gutter) minmax(0,1fr)}
+
+/* Hero */
+.hero{padding:44px 0 88px}
+.brand{font-family:var(--mono);font-size:1rem;color:var(--ink);display:inline-flex;align-items:center;gap:.55rem;margin-bottom:3.2rem}
+.brand i{display:block;width:.7rem;height:.7rem;border-radius:50%;background:var(--rec)}
+.hero-grid{display:grid;grid-template-columns:minmax(0,1.04fr) minmax(0,.96fr);gap:56px;align-items:start}
+.hero h1{position:relative;font-size:var(--h1);line-height:1.05;letter-spacing:-.025em;margin-bottom:1.5rem}
+.tc{font-family:var(--mono);font-weight:400;font-variant-numeric:tabular-nums;color:var(--rec-text)}
+.hero .tc{position:absolute;right:calc(100% + 1.4rem);top:calc(var(--h1) * .9 - 14px);font-size:1rem;line-height:1;white-space:nowrap}
+.deck{font-size:1.3rem;line-height:1.5;margin-bottom:2rem}
+.cmd{display:flex;align-items:center;gap:.9rem;background:var(--night);color:var(--night-text);border-radius:6px;padding:.85rem .85rem .85rem 1.1rem;max-width:34rem;margin:0 0 1.1rem}
+.cmd .p{color:#6b7689;font-family:var(--mono);user-select:none}
+.cmd code{flex:1;min-width:0;font-size:.95rem;overflow-x:auto;white-space:nowrap}
+.copy{font:600 .85rem/1 var(--sans);color:var(--night);background:var(--night-text);border:0;border-radius:4px;padding:.55rem .8rem;cursor:pointer;min-width:4.6rem}
+.copy:hover{background:#fff}
+.btns{display:flex;flex-wrap:wrap;gap:.8rem}
+.btn{display:inline-block;font:600 1rem/1 var(--sans);padding:.95rem 1.25rem;border-radius:6px;border:1.5px solid var(--ink);color:var(--ink)}
+.btn:hover{text-decoration:none;background:#e3e6ec}
+.btn.primary{background:var(--ink);color:#fff}
+.btn.primary:hover{background:#1f2a44}
+.pages{max-width:470px;justify-self:end;width:100%}
+.pages img{display:block;width:100%;height:auto;border:1px solid #1d2638}
+
+/* Sections */
+.body{padding-bottom:40px}
+.toc{position:sticky;top:28px;align-self:start;display:flex;flex-direction:column;gap:.15rem;font:400 .95rem/1.3 var(--sans);padding-right:1.4rem}
+.toc a{color:var(--muted);padding:.4rem 0 .4rem .8rem;border-left:2px solid transparent}
+.toc a:hover{color:var(--ink);text-decoration:none}
+.toc a[aria-current="true"]{color:var(--ink);font-weight:600;border-left-color:var(--rec)}
+section{padding:0 0 96px;scroll-margin-top:28px}
+h2{font-size:clamp(1.7rem,3vw,2.2rem);letter-spacing:-.015em;margin-bottom:1.1rem}
+h3{font-size:1.05rem;margin-bottom:.25rem}
+
+.annot{display:grid;grid-template-columns:minmax(0,430px) minmax(0,1fr);gap:56px;align-items:start}
+.annot figure{margin:0;position:relative}
+.annot img{display:block;width:100%;height:auto;border:1px solid var(--rule)}
+.pin{position:absolute;left:var(--x);top:var(--y);width:1.7rem;height:1.7rem;margin:-.85rem 0 0 -.85rem;border-radius:50%;background:var(--rec);color:#fff;font:600 .8rem/1.7rem var(--mono);text-align:center;box-shadow:0 0 0 3px var(--paper)}
+.callouts{list-style:none;margin:0;padding:0;counter-reset:c}
+.callouts li{position:relative;padding:0 0 1.5rem 2.6rem;counter-increment:c;max-width:34em}
+.callouts li::before{content:counter(c);position:absolute;left:0;top:.1rem;width:1.7rem;height:1.7rem;border-radius:50%;background:var(--rec);color:#fff;font:600 .8rem/1.7rem var(--mono);text-align:center}
+.callouts p{margin:0}
+.opts{margin-top:.5rem;padding-top:1.2rem;border-top:1px solid var(--rule);max-width:34em}
+
+.steps{list-style:none;margin:0;padding:0;counter-reset:s;max-width:var(--measure)}
+.steps li{counter-increment:s;position:relative;padding:0 0 1.6rem 3rem}
+.steps li::before{content:counter(s);position:absolute;left:0;top:.05rem;font:400 1rem/1.6 var(--mono);color:var(--rec-text);width:1.8rem;text-align:right}
+.steps p{margin:0}
+
+.install .cmd{max-width:40rem}
+.small{font:400 .95rem/1.5 var(--sans);color:var(--muted);max-width:40rem}
+.notes{margin:0;padding:0;list-style:none;max-width:var(--measure)}
+.notes li{padding:0 0 1.1rem}
+.notes strong{font-family:var(--sans);font-weight:600}
+
+footer{border-top:1px solid var(--rule);padding:28px 0 64px;font:400 .9rem/1.5 var(--sans);color:var(--muted)}
+footer .links{display:flex;flex-wrap:wrap;gap:.4rem 1.6rem;margin-bottom:.6rem}
+footer p{max-width:none;margin:0}
+
+@media (max-width:900px){
+  :root{--gutter:0px}
+  .row{display:block}
+  .hero{padding-top:28px}
+  .hero-grid,.annot{grid-template-columns:minmax(0,1fr);gap:40px}
+  .pages{justify-self:start}
+  .cmd{flex-wrap:wrap}
+  .cmd code{flex:1 1 calc(100% - 2rem);font-size:.82rem;white-space:pre-wrap;overflow-wrap:anywhere}
+  .copy{margin-left:auto}
+  .hero .tc{position:static;display:block;margin-bottom:.7rem}
+  .toc{position:static;flex-direction:row;flex-wrap:wrap;gap:.2rem 1rem;padding:0 0 2rem}
+  .toc a{border-left:0;padding:.3rem 0}
+  .toc a[aria-current="true"]{box-shadow:inset 0 -2px var(--rec)}
+  .annot figure{max-width:430px}
+  section{padding-bottom:64px}
+}
+@media (prefers-reduced-motion:reduce){html{scroll-behavior:auto}}
+</style>
+</head>
+<body>
+<a class="skip" href="#output">Skip to content</a>
+
+<header class="hero">
+  <div class="wrap row">
+    <div></div>
+    <div>
+      <div class="brand"><i aria-hidden="true"></i>yt-pdf</div>
+      <div class="hero-grid">
+        <div>
+          <h1><span class="tc" id="timer" aria-hidden="true">59:48</span>Read the talk instead of watching it.</h1>
+          <p class="deck">yt-pdf turns a YouTube video into a reference guide: a TL;DR, clear sections, and the slides that matter, each linked to the moment it appears. In testing, a one-hour talk came out as 12 pages.</p>
+          <div class="cmd"><span class="p" aria-hidden="true">$</span><code>brew install justwaters/tap/yt-pdf</code><button class="copy" type="button" data-copy="brew install justwaters/tap/yt-pdf">Copy</button></div>
+          <div class="btns">
+            <a class="btn primary" href="https://github.com/justwaters/yt-pdf">View on GitHub</a>
+            <a class="btn" href="https://github.com/justwaters/yt-pdf/releases/latest">Release notes</a>
+          </div>
+        </div>
+        <div class="pages">
+          <img src="page-dark.webp" width="909" height="1287" alt="Sample page from a yt-pdf guide for a talk on rate limiters, in the dark theme: a title, a four-bullet TL;DR, section headings with their video times in the left margin, and a framed screenshot of a token bucket slide.">
+        </div>
+      </div>
+    </div>
+  </div>
+</header>
+
+<div class="wrap row body">
+  <nav class="toc" aria-label="On this page">
+    <a href="#output">What you get</a>
+    <a href="#how">How it works</a>
+    <a href="#install">Install</a>
+    <a href="#notes">Good to know</a>
+  </nav>
+  <main id="main">
+
+    <section id="output">
+      <h2>What you get</h2>
+      <div class="annot">
+        <figure>
+          <img src="page-light.webp" width="909" height="1287" alt="The same sample page, with three numbered markers: 1 on the TL;DR, 2 on a section time in the margin, 3 on the screenshot.">
+          <span class="pin" style="--x:21%;--y:17.6%" aria-hidden="true">1</span>
+          <span class="pin" style="--x:14.5%;--y:57.3%" aria-hidden="true">2</span>
+          <span class="pin" style="--x:85%;--y:70%" aria-hidden="true">3</span>
+        </figure>
+        <div>
+          <ol class="callouts">
+            <li><h3>A TL;DR for the whole video</h3><p>A few bullets at the top, so you can decide whether the rest is worth your time.</p></li>
+            <li><h3>Times that open the video</h3><p>Every section and screenshot shows its time in the margin. Click one and YouTube opens at that moment.</p></li>
+            <li><h3>Screenshots of what was on screen</h3><p>Slides, diagrams and code are captured where the speaker discusses them. The video is never downloaded in full.</p></li>
+          </ol>
+          <div class="opts">
+            <p>Light by default, for printing. Add <code>--dark</code> for reading on a screen, or <code>--largeText</code> for bigger type.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="how">
+      <h2>How it works</h2>
+      <ol class="steps">
+        <li><h3>It reads the captions.</h3><p>The transcript comes from YouTube, with a time on every line.</p></li>
+        <li><h3>A model writes the guide.</h3><p>OpenAI, Anthropic, OpenRouter, Nvidia NIM or Google Gemini, with your own key. It rewrites the speech into sections, adds the TL;DR, and picks the moments worth a screenshot.</p></li>
+        <li><h3>ffmpeg grabs the frames.</h3><p>It reads single frames from the video stream at those moments.</p></li>
+        <li><h3>Chromium prints the PDF.</h3><p>Fonts are bundled, so the result looks the same on macOS and Linux. It uses Chrome or Edge if you have one, and otherwise downloads a small headless Chromium once (about 100 MB).</p></li>
+      </ol>
+    </section>
+
+    <section id="install" class="install">
+      <h2>Install</h2>
+      <div class="cmd"><span class="p" aria-hidden="true">$</span><code>brew install justwaters/tap/yt-pdf</code><button class="copy" type="button" data-copy="brew install justwaters/tap/yt-pdf">Copy</button></div>
+      <p class="small">No Homebrew? Use <code>uv tool install "git+https://github.com/justwaters/yt-pdf"</code> instead.</p>
+      <p>Then add a key once and point it at a video:</p>
+      <div class="cmd"><span class="p" aria-hidden="true">$</span><code>yt-pdf auth login</code><button class="copy" type="button" data-copy="yt-pdf auth login">Copy</button></div>
+      <div class="cmd"><span class="p" aria-hidden="true">$</span><code>yt-pdf "https://www.youtube.com/watch?v=VIDEO_ID"</code><button class="copy" type="button" data-copy='yt-pdf "https://www.youtube.com/watch?v=VIDEO_ID"'>Copy</button></div>
+      <p class="small">The PDF is saved next to where you ran it, named after the video.</p>
+    </section>
+
+    <section id="notes">
+      <h2>Good to know</h2>
+      <ul class="notes">
+        <li><strong>The video needs captions.</strong> Automatic ones count. Without any, there is nothing to read.</li>
+        <li><strong>The transcript goes to the model you choose.</strong> You bring the key, and free OpenRouter models work for trying it out.</li>
+        <li><strong>Screenshots need ffmpeg.</strong> Without it you still get the PDF, just with no screenshots.</li>
+        <li><strong>Run it from your own machine.</strong> YouTube often blocks transcript requests that come from cloud servers.</li>
+      </ul>
+    </section>
+
+  </main>
+</div>
+
+<footer>
+  <div class="wrap row">
+    <div></div>
+    <div>
+      <div class="links">
+        <a href="https://github.com/justwaters/yt-pdf">Source on GitHub</a>
+        <a href="https://github.com/justwaters/yt-pdf/releases">All releases</a>
+        <a href="https://github.com/justwaters/homebrew-tap">Homebrew tap</a>
+      </div>
+      <p>Set in Source Serif 4 and IBM Plex, both under the SIL Open Font License. The sample guide is made up; no real talk is shown.</p>
+    </div>
+  </div>
+</footer>
+
+<script>
+(function () {
+  // The headline timecode counts up to the real length of the talk once, then rests.
+  var timer = document.getElementById('timer');
+  var target = 59 * 60 + 48;
+  var fmt = function (s) { return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0'); };
+  if (timer && !matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    var start = null, dur = 1700;
+    timer.textContent = '0:00';
+    requestAnimationFrame(function tick(t) {
+      if (start === null) start = t;
+      var p = Math.min((t - start) / dur, 1), eased = 1 - Math.pow(1 - p, 3);
+      timer.textContent = fmt(Math.round(target * eased));
+      if (p < 1) requestAnimationFrame(tick);
+    });
+  }
+
+  // Copy buttons answer the click, and disappear if the browser can't copy.
+  var buttons = document.querySelectorAll('[data-copy]');
+  buttons.forEach(function (b) {
+    if (!navigator.clipboard) { b.hidden = true; return; }
+    b.addEventListener('click', function () {
+      navigator.clipboard.writeText(b.dataset.copy).then(function () {
+        var label = b.textContent; b.textContent = 'Copied';
+        setTimeout(function () { b.textContent = label; }, 1600);
+      });
+    });
+  });
+
+  // Mark the section in view in the side nav.
+  var links = [].slice.call(document.querySelectorAll('.toc a'));
+  var seen = new IntersectionObserver(function (entries) {
+    entries.forEach(function (e) {
+      if (!e.isIntersecting) return;
+      links.forEach(function (a) { a.toggleAttribute('aria-current', a.getAttribute('href') === '#' + e.target.id); if (a.hasAttribute('aria-current')) a.setAttribute('aria-current', 'true'); });
+    });
+  }, { rootMargin: '-20% 0px -65% 0px' });
+  document.querySelectorAll('main section').forEach(function (s) { seen.observe(s); });
+})();
+</script>
+</body>
+</html>

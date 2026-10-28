@@ -1,0 +1,28 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "yt-pdf"
+version = "0.1.0"
+description = "Turn YouTube videos into styled PDF reference guides with inline screenshots and a TL;DR."
+readme = "README.md"
+requires-python = ">=3.10,<3.15"
+dependencies = [
+    "click>=8.1",
+    "questionary>=2.0",
+    "rich>=13.0",
+    "youtube-transcript-api>=1.0",
+    "yt-dlp>=2025.1.1",
+    "playwright>=1.45",
+    "markdown>=3.5",
+    "anthropic>=0.40",
+    "openai>=1.50",
+    "google-genai>=1.0",
+]
+
+[project.scripts]
+yt-pdf = "yt_pdf.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["yt_pdf"]

@@ -17,9 +17,11 @@ PDFs are printed by a browser. yt-pdf uses Playwright's headless Chromium if pre
 ```sh
 yt-pdf auth login         # pick a provider, paste an API key (verified, stored 0600)
 yt-pdf model              # optional: change the model
-yt-pdf "https://www.youtube.com/watch?v=VIDEO_ID" [--dark] [-o out.pdf]
+yt-pdf "https://www.youtube.com/watch?v=VIDEO_ID" [--dark] [--largeText] [-o out.pdf]
 yt-pdf auth               # show provider/model status
 ```
+
+Text is a compact size by default; `--largeText` gives the larger size. `--dark` switches to the dark theme.
 
 Providers: OpenAI, Anthropic, OpenRouter, Nvidia NIM, Google Gemini. Config lives in `~/.config/yt-pdf/config.json`.
 

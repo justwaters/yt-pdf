@@ -36,7 +36,7 @@ def cli() -> None:
     """Turn a YouTube video into a styled PDF reference guide.
 
     \b
-    yt-pdf "<url>" [--dark] [-o out.pdf]   generate a PDF
+    yt-pdf "<url>" [--dark] [--largeText] [-o out.pdf]   generate a PDF
     yt-pdf auth                            show provider status
     yt-pdf auth login                      add or switch an API key
     yt-pdf model                           choose the model
@@ -49,9 +49,11 @@ def cli() -> None:
 @cli.command(name="run", hidden=True)
 @click.argument("url")
 @click.option("--dark", is_flag=True, help="Render the dark theme (default: light).")
+@click.option("--largeText", "--large-text", "large_text", is_flag=True, help="Use larger text (default: normal).")
 @click.option("--output", "-o", type=click.Path(dir_okay=False, path_type=Path), help="Output PDF path.")
-def run(url: str, dark: bool, output: Path | None) -> None:
+def run(url: str, dark: bool, large_text: bool, output: Path | None) -> None:
     theme = "dark" if dark else "light"
+    text_size = "large" if large_text else "normal"
     provider, api_key, model = config.active_settings(config.load_config())
     video_id = video.extract_video_id(url)
     output = output or Path.cwd() / f"{video_id}_{theme}.pdf"
@@ -77,8 +79,10 @@ def run(url: str, dark: bool, output: Path | None) -> None:
 
     max_shots = MAX_SHOTS if info and info.stream_url else 0
     with console.status(f"Writing the guide with {config.PROVIDERS[provider]['label']} / {model}…"):
-        guide = llm.generate_guide(provider, api_key, model, title, transcript, max_shots)
+        guide, truncated = llm.generate_guide(provider, api_key, model, title, transcript, max_shots)
     console.print("[green]✓[/] Guide written")
+    if truncated:
+        err.print("[yellow]Warning:[/] the model hit its output limit, so the guide may end early. Try another model.")
 
     frames: dict[int, str] = {}
     _, body = pdf.parse_guide(guide)
@@ -97,7 +101,7 @@ def run(url: str, dark: bool, output: Path | None) -> None:
     with console.status("Rendering PDF…"):
         doc = pdf.build_html(
             guide, frames, title=title, video_id=video_id, source_url=url, theme=theme,
-            channel=info.channel if info else None, duration=duration,
+            channel=info.channel if info else None, duration=duration, text_size=text_size,
         )
         pdf.render_pdf(doc, output, log=console.print)
     console.print(f"[bold green]Saved[/] {output}")

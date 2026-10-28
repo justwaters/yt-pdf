@@ -24,9 +24,9 @@ PROVIDERS: dict[str, dict[str, Any]] = {
     },
     "openrouter": {
         "label": "OpenRouter",
-        "default_model": "anthropic/claude-3.7-sonnet",
+        "default_model": "anthropic/claude-sonnet-5.5",
         "models": [
-            "anthropic/claude-3.7-sonnet",
+            "anthropic/claude-sonnet-5.5",
             "meta-llama/llama-3.3-70b-instruct",
             "google/gemini-2.5-flash",
         ],

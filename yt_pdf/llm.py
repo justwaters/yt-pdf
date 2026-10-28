@@ -14,6 +14,7 @@ OPENAI_COMPATIBLE_BASE_URLS: dict[str, str | None] = {
 }
 
 MAX_OUTPUT_TOKENS = 12000
+MIN_OUTPUT_TOKENS = 3000
 RATE_LIMIT_RETRIES = 3
 
 SYSTEM_PROMPT = """\
@@ -40,6 +41,16 @@ Body rules:
   Use at most {max_shots} tags, at least 30 seconds apart, and none if the video is audio-only talk.
 - Output only the Markdown. No preamble, no outer code fence.
 """
+
+
+def output_token_budget(transcript: str) -> int:
+    """Output limit sized to the video: the guide is roughly as long as the transcript.
+
+    Asking for less than the maximum matters because some hosts (OpenRouter) refuse a request
+    outright when the key can't afford the full limit, even if the reply would be short.
+    """
+    transcript_tokens = len(transcript) // 4
+    return max(MIN_OUTPUT_TOKENS, min(MAX_OUTPUT_TOKENS, int(transcript_tokens * 1.2) + 1500))
 
 
 def build_user_prompt(title: str, transcript: str) -> str:
@@ -75,7 +86,10 @@ def _is_rate_limit(exc: Exception) -> bool:
 # --------------------------------------------------------------------------- backends
 
 
-def _call_anthropic(api_key: str, model: str, system: str, user: str, max_tokens: int) -> str:
+Reply = tuple[str, bool]  # (text, hit the output-token limit)
+
+
+def _call_anthropic(api_key: str, model: str, system: str, user: str, max_tokens: int) -> Reply:
     import anthropic
 
     client = anthropic.Anthropic(api_key=api_key)
@@ -86,12 +100,14 @@ def _call_anthropic(api_key: str, model: str, system: str, user: str, max_tokens
         system=system,
         messages=[{"role": "user", "content": user}],
     ) as stream:
-        return stream.get_final_text()
+        message = stream.get_final_message()
+    text = "".join(block.text for block in message.content if block.type == "text")
+    return text, message.stop_reason == "max_tokens"
 
 
 def _call_openai_compatible(
     provider: str, api_key: str, model: str, system: str, user: str, max_tokens: int
-) -> str:
+) -> Reply:
     import openai
 
     client = openai.OpenAI(api_key=api_key, base_url=OPENAI_COMPATIBLE_BASE_URLS[provider])
@@ -102,10 +118,11 @@ def _call_openai_compatible(
         messages=[{"role": "system", "content": system}, {"role": "user", "content": user}],
         **{limit_arg: max_tokens},
     )
-    return resp.choices[0].message.content or ""
+    choice = resp.choices[0]
+    return choice.message.content or "", choice.finish_reason == "length"
 
 
-def _call_gemini(api_key: str, model: str, system: str, user: str, max_tokens: int) -> str:
+def _call_gemini(api_key: str, model: str, system: str, user: str, max_tokens: int) -> Reply:
     from google import genai
     from google.genai import types
 
@@ -115,10 +132,11 @@ def _call_gemini(api_key: str, model: str, system: str, user: str, max_tokens: i
         contents=user,
         config=types.GenerateContentConfig(system_instruction=system, max_output_tokens=max_tokens),
     )
-    return resp.text or ""
+    reason = str(resp.candidates[0].finish_reason) if resp.candidates else ""
+    return resp.text or "", "MAX_TOKENS" in reason
 
 
-def _dispatch(provider: str) -> Callable[[str, str, str, str, int], str]:
+def _dispatch(provider: str) -> Callable[[str, str, str, str, int], Reply]:
     if provider == "anthropic":
         return _call_anthropic
     if provider == "gemini":
@@ -138,7 +156,7 @@ def complete(
     user: str,
     max_tokens: int = MAX_OUTPUT_TOKENS,
     retries: int = RATE_LIMIT_RETRIES,
-) -> str:
+) -> Reply:
     """One chat completion, retrying rate limits with backoff."""
     call = _dispatch(provider)
     for attempt in range(retries + 1):
@@ -161,10 +179,16 @@ def verify_key(provider: str, api_key: str, model: str) -> None:
 
 def generate_guide(
     provider: str, api_key: str, model: str, title: str, transcript: str, max_shots: int
-) -> str:
+) -> tuple[str, bool]:
+    """Return (markdown guide, truncated). Truncated means the reply still hit the token cap."""
     system = SYSTEM_PROMPT.replace("{max_shots}", str(max_shots))
-    text = complete(provider, api_key, model, system, build_user_prompt(title, transcript))
+    user = build_user_prompt(title, transcript)
+    budget = output_token_budget(transcript)
+    text, truncated = complete(provider, api_key, model, system, user, max_tokens=budget)
+    if truncated and budget < MAX_OUTPUT_TOKENS:
+        # The size estimate was too tight for this model (verbose or reasoning models); retry once at the cap.
+        text, truncated = complete(provider, api_key, model, system, user, max_tokens=MAX_OUTPUT_TOKENS)
     text = text.strip()
     if not text:
         raise YtPdfError(f"{provider} returned an empty response. Try a different model.")
-    return text
+    return text, truncated

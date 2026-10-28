@@ -42,6 +42,9 @@ THEMES: dict[str, dict[str, str]] = {
     },
 }
 
+# "large" is the original sizing; "normal" (the default) is 10% smaller across the board.
+TEXT_SCALES = {"normal": 0.9, "large": 1.0}
+
 CSS = """
 @page { size: A4; margin: 15mm 15mm; }
 * { box-sizing: border-box; }
@@ -49,13 +52,13 @@ html { background: var(--bg); -webkit-print-color-adjust: exact; print-color-adj
 body {
   margin: 0; background: var(--bg); color: var(--text);
   font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-  font-size: 10.5pt; line-height: 1.6;
+  font-size: calc(10.5pt * var(--scale)); line-height: 1.6;
   -webkit-print-color-adjust: exact; print-color-adjust: exact;
 }
 h1, h2, h3, h4 { color: var(--heading); line-height: 1.25; break-after: avoid; }
-h1 { font-size: 22pt; margin: 0 0 4pt; }
-h2 { font-size: 15pt; margin: 22pt 0 8pt; padding-bottom: 4pt; border-bottom: 1px solid var(--border); }
-h3 { font-size: 12pt; margin: 16pt 0 6pt; }
+h1 { font-size: calc(22pt * var(--scale)); margin: 0 0 4pt; }
+h2 { font-size: calc(15pt * var(--scale)); margin: 22pt 0 8pt; padding-bottom: 4pt; border-bottom: 1px solid var(--border); }
+h3 { font-size: calc(12pt * var(--scale)); margin: 16pt 0 6pt; }
 p { margin: 0 0 8pt; orphans: 3; widows: 3; }
 a { color: var(--accent); text-decoration: none; }
 ul, ol { margin: 0 0 8pt; padding-left: 18pt; }
@@ -63,30 +66,30 @@ li { margin-bottom: 3pt; }
 strong { color: var(--heading); }
 blockquote { margin: 8pt 0; padding: 2pt 12pt; border-left: 3px solid var(--accent); color: var(--muted); break-inside: avoid; }
 code, pre { font-family: "SF Mono", Menlo, Consolas, "Liberation Mono", monospace; }
-code { background: var(--code_bg); border: 1px solid var(--border); border-radius: 4px; padding: 0 4px; font-size: 9.5pt; }
+code { background: var(--code_bg); border: 1px solid var(--border); border-radius: 4px; padding: 0 4px; font-size: calc(9.5pt * var(--scale)); }
 pre {
   background: var(--code_bg); border: 1px solid var(--border); border-radius: 8px;
-  padding: 10pt 12pt; margin: 8pt 0 12pt; font-size: 9pt; line-height: 1.5;
+  padding: 10pt 12pt; margin: 8pt 0 12pt; font-size: calc(9pt * var(--scale)); line-height: 1.5;
   white-space: pre-wrap; word-break: break-word; break-inside: avoid;
 }
 pre code { background: none; border: 0; padding: 0; font-size: inherit; }
-table { border-collapse: collapse; width: 100%; margin: 8pt 0 12pt; break-inside: avoid; font-size: 9.5pt; }
+table { border-collapse: collapse; width: 100%; margin: 8pt 0 12pt; break-inside: avoid; font-size: calc(9.5pt * var(--scale)); }
 th, td { border: 1px solid var(--border); padding: 5pt 8pt; text-align: left; vertical-align: top; }
 th { background: var(--card); color: var(--heading); }
 .doc-header { margin-bottom: 14pt; padding-bottom: 10pt; border-bottom: 2px solid var(--border); }
-.meta { color: var(--muted); font-size: 9pt; }
+.meta { color: var(--muted); font-size: calc(9pt * var(--scale)); }
 .tldr {
   background: var(--card); border: 1px solid var(--border); border-left: 4px solid var(--accent);
   border-radius: 8px; padding: 10pt 14pt; margin: 0 0 16pt; break-inside: avoid;
 }
-.tldr h2 { margin: 0 0 6pt; padding: 0; border: 0; font-size: 12pt; text-transform: uppercase; letter-spacing: .06em; }
+.tldr h2 { margin: 0 0 6pt; padding: 0; border: 0; font-size: calc(12pt * var(--scale)); text-transform: uppercase; letter-spacing: .06em; }
 .tldr ul { margin-bottom: 0; }
 figure.shot {
   margin: 12pt 0 14pt; padding: 6pt; background: var(--card);
   border: 1px solid var(--border); border-radius: 10px; break-inside: avoid;
 }
 figure.shot img { display: block; width: 100%; height: auto; border-radius: 6px; }
-figure.shot figcaption { margin-top: 5pt; font-size: 8.5pt; color: var(--muted); text-align: right; }
+figure.shot figcaption { margin-top: 5pt; font-size: calc(8.5pt * var(--scale)); color: var(--muted); text-align: right; }
 """
 
 
@@ -149,6 +152,7 @@ def build_html(
     theme: str,
     channel: str | None = None,
     duration: int | None = None,
+    text_size: str = "normal",
 ) -> str:
     tldr_md, body_md = parse_guide(guide)
     ordered = sorted(frames)
@@ -181,7 +185,7 @@ def build_html(
         meta.append(format_timestamp(duration))
     meta.append(date.today().isoformat())
 
-    variables = "".join(f"--{k}:{v};" for k, v in THEMES[theme].items())
+    variables = "".join(f"--{k}:{v};" for k, v in THEMES[theme].items()) + f"--scale:{TEXT_SCALES[text_size]};"
     # The CSP is a backstop: transcript-derived text must never load remote content or run scripts.
     csp = "default-src 'none'; img-src data:; style-src 'unsafe-inline'"
     return (

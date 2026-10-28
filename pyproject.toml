@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "yt-pdf"
-version = "0.2.0"
+version = "0.3.0"
 description = "Turn YouTube videos into styled PDF reference guides with inline screenshots and a TL;DR."
 readme = "README.md"
 requires-python = ">=3.10,<3.15"
@@ -22,8 +22,14 @@ dependencies = [
     "google-genai>=1.0",
 ]
 
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
 [project.scripts]
 yt-pdf = "yt_pdf.cli:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["yt_pdf"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

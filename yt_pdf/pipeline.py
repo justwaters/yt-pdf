@@ -136,6 +136,7 @@ def make_guide(
             err.print(f"[yellow]Warning:[/] {exc}\nContinuing without screenshots; the title falls back to the video ID.")
     title = info.title if info else (entry.title or video_id)
     duration = info.duration if info else None
+    entry.title = entry.title or title  # so a failure further on is reported by name, not by ID
     output = output or default_output_path(directory, title, video_id, opts, taken)
     if skip_existing and output.exists():
         console.print(f"[dim]Skipped, already exists: {output}[/]")

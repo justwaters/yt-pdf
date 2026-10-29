@@ -94,3 +94,10 @@ def test_style_is_in_the_default_file_name(env):
     _, tmp = env
     CliRunner().invoke(cli.cli, [f"https://youtu.be/{IDS[0]}", "-o", str(tmp), "--style", "summary", "--format", "md"])
     assert (tmp / "Talk-0_summary.md").exists()
+
+
+def test_failed_video_is_named_in_the_summary_even_when_given_as_a_plain_url(env):
+    _, tmp = env
+    urls = [f"https://youtu.be/{i}" for i in IDS]
+    result = CliRunner().invoke(cli.cli, [*urls, "-o", str(tmp / "o")])
+    assert "✗ Talk 1:" in result.output and IDS[1] not in result.output.split("Batch finished")[1]

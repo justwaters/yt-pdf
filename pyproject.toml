@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "yt-pdf"
-version = "0.6.0"
+version = "0.6.1"
 description = "Turn YouTube videos into styled PDF reference guides with inline screenshots and a TL;DR."
 readme = "README.md"
 requires-python = ">=3.10,<3.15"

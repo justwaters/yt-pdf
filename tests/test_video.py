@@ -61,3 +61,35 @@ def test_filename_stem_uses_the_title_and_stays_safe():
     assert video.filename_stem("../../etc/passwd", "abcdefghijk") == "etc-passwd"
     assert video.filename_stem("???", "abcdefghijk") == "abcdefghijk"
     assert len(video.filename_stem("x" * 300, "abcdefghijk")) <= 80
+
+
+@pytest.mark.parametrize(
+    "url,expected",
+    [
+        ("https://www.youtube.com/playlist?list=PL123", True),
+        ("https://www.youtube.com/@karpathy", True),
+        ("https://www.youtube.com/@karpathy/videos", True),
+        ("https://www.youtube.com/channel/UC123", True),
+        ("https://www.youtube.com/watch?v=dQw4w9WgXcQ&list=PL123", False),
+        ("https://youtu.be/dQw4w9WgXcQ", False),
+    ],
+)
+def test_playlist_and_channel_urls_are_recognised(url, expected):
+    assert video.is_collection_url(url) is expected
+
+
+def test_missing_captions_is_a_distinct_error(monkeypatch):
+    class TranscriptsDisabled(Exception):
+        pass
+
+    def boom(vid):
+        raise TranscriptsDisabled()
+
+    monkeypatch.setattr(video, "_snippets", boom)
+    with pytest.raises(video.NoCaptionsError):
+        video.fetch_snippets("abcdefghijk")
+
+
+def test_format_transcript_groups_into_chunks():
+    text = video.format_transcript([(0.0, "a"), (5.0, "b"), (25.0, "c")])
+    assert text == "[0s] a b\n[25s] c"

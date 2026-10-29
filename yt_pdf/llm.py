@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import time
+from dataclasses import dataclass
 from typing import Callable
 
 from .errors import YtPdfError
@@ -30,6 +31,8 @@ Output format, exactly:
 
 Then the guide body in Markdown.
 
+{style_rules}
+
 Body rules:
 - Do not write a top-level `#` heading (the title is added separately). Use `##` and `###` for structure.
 - Rewrite conversational speech into tight, readable prose. Drop filler, greetings, sponsor reads and repetition.
@@ -46,14 +49,60 @@ Body rules:
 """
 
 
-def output_token_budget(transcript: str) -> int:
+@dataclass(frozen=True)
+class Style:
+    summary: str  # one line for --help and the README
+    rules: str  # injected into the system prompt
+    max_tokens: int  # hard output limit for this style
+    max_shots: int
+
+
+STYLES: dict[str, Style] = {
+    "full": Style(
+        "complete guide: every section, detail, number and step (default)",
+        "Style: full guide. Cover the whole video section by section, keeping every technical detail.",
+        MAX_OUTPUT_TOKENS,
+        20,
+    ),
+    "summary": Style(
+        "one to two pages: the TL;DR plus a few short sections",
+        "Style: short summary, one to two pages at most. Write 3-6 `##` sections of one or two short paragraphs "
+        "or a few bullets each, covering only the main points, conclusions and any numbers that matter. "
+        "Skip examples, asides and step-by-step detail.",
+        4000,
+        3,
+    ),
+    "notes": Style(
+        "study notes: the guide, then key terms and review questions",
+        "Style: study notes. Write the guide tightly as notes (short paragraphs, bullets). After the body, add "
+        "two final sections: `## Key terms` (a bullet list of `**term**: definition`, only terms the video "
+        "defines or relies on) and `## Review questions` (6-10 questions that test understanding, each as "
+        "`**Q:** ...` followed on the next line by `**A:** ...`). Those two sections take no `{{AT}}` tag.",
+        MAX_OUTPUT_TOKENS,
+        20,
+    ),
+    "tutorial": Style(
+        "how-to: prerequisites, numbered steps, commands, pitfalls",
+        "Style: step-by-step tutorial. Open with a `## Before you start` section (requirements, versions, "
+        "files), then the work as `##` sections of numbered steps, each step one action with its exact command, "
+        "code or setting in a fenced block. Finish with `## Common problems` if the video mentions any. Drop "
+        "stories, opinions and background that are not needed to follow along. Prefer screenshots of the "
+        "interface or result a step produces.",
+        MAX_OUTPUT_TOKENS,
+        20,
+    ),
+}
+DEFAULT_STYLE = "full"
+
+
+def output_token_budget(transcript: str, cap: int = MAX_OUTPUT_TOKENS) -> int:
     """Output limit sized to the video: the guide is roughly as long as the transcript.
 
     Asking for less than the maximum matters because some hosts (OpenRouter) refuse a request
     outright when the key can't afford the full limit, even if the reply would be short.
     """
     transcript_tokens = len(transcript) // 4
-    return max(MIN_OUTPUT_TOKENS, min(MAX_OUTPUT_TOKENS, int(transcript_tokens * 1.2) + 1500))
+    return min(cap, max(MIN_OUTPUT_TOKENS, int(transcript_tokens * 1.2) + 1500))
 
 
 def build_user_prompt(title: str, transcript: str) -> str:
@@ -181,16 +230,25 @@ def verify_key(provider: str, api_key: str, model: str) -> None:
 
 
 def generate_guide(
-    provider: str, api_key: str, model: str, title: str, transcript: str, max_shots: int
+    provider: str,
+    api_key: str,
+    model: str,
+    title: str,
+    transcript: str,
+    max_shots: int,
+    style: str = DEFAULT_STYLE,
 ) -> tuple[str, bool]:
     """Return (markdown guide, truncated). Truncated means the reply still hit the token cap."""
-    system = SYSTEM_PROMPT.replace("{max_shots}", str(max_shots))
+    spec = STYLES[style]
+    shots = min(max_shots, spec.max_shots)
+    system = SYSTEM_PROMPT.replace("{style_rules}", spec.rules).replace("{max_shots}", str(shots))
     user = build_user_prompt(title, transcript)
-    budget = output_token_budget(transcript)
+    cap = spec.max_tokens
+    budget = output_token_budget(transcript, cap)
     text, truncated = complete(provider, api_key, model, system, user, max_tokens=budget)
-    if truncated and budget < MAX_OUTPUT_TOKENS:
+    if truncated and budget < cap:
         # The size estimate was too tight for this model (verbose or reasoning models); retry once at the cap.
-        text, truncated = complete(provider, api_key, model, system, user, max_tokens=MAX_OUTPUT_TOKENS)
+        text, truncated = complete(provider, api_key, model, system, user, max_tokens=cap)
     text = text.strip()
     if not text:
         raise YtPdfError(f"{provider} returned an empty response. Try a different model.")

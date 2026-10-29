@@ -11,7 +11,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from urllib.parse import parse_qs, urlparse
 
-from .errors import YtPdfError
+from .errors import NoCaptionsError, YtPdfError
 
 _ID_RE = re.compile(r"^[A-Za-z0-9_-]{11}$")
 _YT_HOSTS = {"youtube.com", "www.youtube.com", "m.youtube.com", "music.youtube.com", "youtu.be"}
@@ -64,6 +64,72 @@ def filename_stem(title: str, video_id: str) -> str:
     return stem or video_id
 
 
+@dataclass
+class Entry:
+    video_id: str
+    url: str
+    title: str | None = None
+
+
+def is_collection_url(url: str) -> bool:
+    """A playlist or channel page (many videos) rather than a single video."""
+    parsed = urlparse(url.strip() if "//" in url else f"https://{url.strip()}")
+    host = (parsed.hostname or "").lower()
+    if host not in _YT_HOSTS or host == "youtu.be":
+        return False
+    if parsed.path == "/playlist":
+        return True
+    parts = [p for p in parsed.path.split("/") if p]
+    return bool(parts) and (parts[0].startswith("@") or parts[0] in {"channel", "c", "user"})
+
+
+def expand_url(url: str, limit: int) -> list[Entry]:
+    """The videos behind a URL: the video itself, or the first `limit` of a playlist or channel."""
+    if not is_collection_url(url):
+        return [Entry(extract_video_id(url), url)]
+    import yt_dlp
+
+    parsed = urlparse(url.strip() if "//" in url else f"https://{url.strip()}")
+    target = url.strip()
+    parts = [p for p in parsed.path.split("/") if p]
+    if parts and parts[0] != "playlist" and parts[-1] not in {"videos", "streams", "shorts"}:
+        target = target.rstrip("/") + "/videos"  # a channel's own uploads, not its tab list
+    opts = {"quiet": True, "no_warnings": True, "extract_flat": True, "skip_download": True, "playlistend": limit}
+    try:
+        with yt_dlp.YoutubeDL(opts) as ydl:
+            info = ydl.extract_info(target, download=False)
+    except Exception as exc:
+        raise YtPdfError(f"yt-dlp could not read the playlist or channel: {exc}") from exc
+    entries: list[Entry] = []
+    for item in info.get("entries") or []:
+        vid = (item or {}).get("id")
+        if vid and _ID_RE.match(vid) and all(e.video_id != vid for e in entries):
+            entries.append(Entry(vid, f"https://www.youtube.com/watch?v={vid}", item.get("title")))
+    if not entries:
+        raise YtPdfError("No videos were found at that playlist or channel.")
+    return entries[:limit]
+
+
+def download_audio(url: str, dest_dir: str) -> str:
+    """Download the audio track only. Returns the file path."""
+    import yt_dlp
+
+    opts = {
+        "quiet": True,
+        "no_warnings": True,
+        "noplaylist": True,
+        "noprogress": True,
+        "format": "bestaudio[ext=m4a]/bestaudio/best",
+        "outtmpl": f"{dest_dir}/audio.%(ext)s",
+    }
+    try:
+        with yt_dlp.YoutubeDL(opts) as ydl:
+            info = ydl.extract_info(url, download=True)
+            return ydl.prepare_filename(info)
+    except Exception as exc:
+        raise YtPdfError(f"yt-dlp could not download the audio: {exc}") from exc
+
+
 # --------------------------------------------------------------------------- transcript
 
 
@@ -87,16 +153,16 @@ def _snippets(video_id: str) -> list[tuple[float, str]]:
     return [(float(s.start), s.text) for s in fetched]
 
 
-def get_transcript(video_id: str) -> str:
-    """Transcript as `[123s] text` lines, grouped into ~20 second chunks to save tokens."""
+def fetch_snippets(video_id: str) -> list[tuple[float, str]]:
+    """YouTube's own captions as (start seconds, text). Raises NoCaptionsError when there are none."""
     try:
-        snippets = _snippets(video_id)
+        return _snippets(video_id)
     except Exception as exc:
         name = type(exc).__name__
         if name == "TranscriptsDisabled":
-            raise YtPdfError("Subtitles are disabled for this video, so there is no transcript.") from exc
+            raise NoCaptionsError("Subtitles are disabled for this video, so there is no transcript.") from exc
         if name == "NoTranscriptFound":
-            raise YtPdfError("This video has no usable transcript or captions.") from exc
+            raise NoCaptionsError("This video has no usable transcript or captions.") from exc
         if name in {"VideoUnavailable", "VideoUnplayable", "InvalidVideoId"}:
             raise YtPdfError("The video is unavailable (private, removed or region-locked).") from exc
         if name in {"IpBlocked", "RequestBlocked"}:
@@ -107,6 +173,9 @@ def get_transcript(video_id: str) -> str:
             raise YtPdfError("The video is age-restricted; its transcript cannot be fetched.") from exc
         raise YtPdfError(f"Could not fetch the transcript: {exc}") from exc
 
+
+def format_transcript(snippets: list[tuple[float, str]]) -> str:
+    """`[123s] text` lines, grouped into ~20 second chunks to save tokens."""
     lines: list[str] = []
     chunk_start: float | None = None
     buf: list[str] = []
@@ -125,6 +194,10 @@ def get_transcript(video_id: str) -> str:
     if not lines:
         raise YtPdfError("The transcript was empty.")
     return "\n".join(lines)
+
+
+def get_transcript(video_id: str) -> str:
+    return format_transcript(fetch_snippets(video_id))
 
 
 # --------------------------------------------------------------------------- yt-dlp

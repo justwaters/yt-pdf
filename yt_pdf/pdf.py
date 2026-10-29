@@ -271,18 +271,19 @@ def _page_css(theme: str, title: str) -> str:
     )
 
 
-def build_html(
+def render_body(
     guide: str,
     frames: dict[int, str],
     *,
-    title: str,
     video_id: str,
-    source_url: str,
-    theme: str,
-    channel: str | None = None,
     duration: int | None = None,
-    text_size: str = "normal",
+    image_src: Callable[[int], str] | None = None,
 ) -> str:
+    """The guide as sanitised HTML: TL;DR block plus body, timecodes linked, screenshots as figures.
+
+    `image_src` maps a screenshot time to the <img> src (default: the data URI in `frames`).
+    """
+    image_src = image_src or frames.__getitem__
     tldr_md, body_md = parse_guide(guide)
 
     def swap_shot(match: re.Match[str]) -> str:
@@ -306,7 +307,7 @@ def build_html(
         sec = int(match.group(1))
         return (
             f'<figure class="shot">{timecode(sec)}'
-            f'<img src="{frames[sec]}" alt="Video frame at {format_timestamp(sec)}"></figure>'
+            f'<img src="{html.escape(image_src(sec), quote=True)}" alt="Video frame at {format_timestamp(sec)}"></figure>'
         )
 
     body_html = _AT_PLACEHOLDER_RE.sub(timed_heading, body_html)
@@ -314,6 +315,22 @@ def build_html(
     body_html = _LEFTOVER_PLACEHOLDER_RE.sub("", body_html)  # tags the model misplaced
 
     tldr_html = f'<section class="tldr"><h2>TL;DR</h2>{_md(tldr_md)}</section>' if tldr_md else ""
+    return tldr_html + body_html
+
+
+def build_html(
+    guide: str,
+    frames: dict[int, str],
+    *,
+    title: str,
+    video_id: str,
+    source_url: str,
+    theme: str,
+    channel: str | None = None,
+    duration: int | None = None,
+    text_size: str = "normal",
+) -> str:
+    content_html = render_body(guide, frames, video_id=video_id, duration=duration)
 
     meta = []
     if channel:
@@ -332,7 +349,7 @@ def build_html(
         f"<title>{html.escape(title)}</title>"
         f"<style>{_font_face_css()}:root{{{variables}}}{CSS}{_page_css(theme, title)}</style></head><body>"
         f'<header class="doc-header"><h1>{html.escape(title)}</h1><div class="meta">{"".join(meta)}</div></header>'
-        f"{tldr_html}{body_html}</body></html>"
+        f"{content_html}</body></html>"
     )
 
 

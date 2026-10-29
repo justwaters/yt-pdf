@@ -8,16 +8,15 @@ from pathlib import Path
 import click
 import questionary
 from rich.console import Console
-from rich.progress import BarColumn, Progress, TextColumn, TimeElapsedColumn
 from rich.table import Table
 
-from . import __version__, config, llm, pdf, video
+from . import __version__, config, formats, llm, transcribe, video
 from .errors import YtPdfError
+from .pipeline import Consent, Options, default_output_path, is_interactive, make_guide
 
 console = Console()
 err = Console(stderr=True)
 
-MAX_SHOTS = 20
 CUSTOM_MODEL = "Custom model name…"
 
 
@@ -36,7 +35,9 @@ def cli() -> None:
     """Turn a YouTube video into a styled PDF reference guide.
 
     \b
-    yt-pdf "<url>" [--dark] [--largeText] [-o out.pdf]   generate a PDF
+    yt-pdf "<url>" [--format pdf|html|md|epub] [--style full|summary|notes|tutorial]
+                   [--dark] [--largeText] [-o out]      generate a guide
+    yt-pdf "<playlist or channel url>" [--limit N]      one guide per video
     yt-pdf auth                            show provider status
     yt-pdf auth login                      add or switch an API key
     yt-pdf model                           choose the model
@@ -46,67 +47,112 @@ def cli() -> None:
 # --------------------------------------------------------------------------- run
 
 
+def _read_url_file(path: Path) -> list[str]:
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError as exc:
+        raise YtPdfError(f"Could not read {path}: {exc}") from exc
+    return [ln.strip() for ln in lines if ln.strip() and not ln.strip().startswith("#")]
+
+
+def _collect(urls: list[str], limit: int) -> tuple[list[video.Entry], bool]:
+    """Every distinct video behind the URLs, and whether any URL was a playlist or channel."""
+    entries: list[video.Entry] = []
+    from_collection = False
+    for url in urls:
+        if video.is_collection_url(url):
+            from_collection = True
+            with console.status(f"Reading {url}…"):
+                found = video.expand_url(url, limit)
+            console.print(f"[green]✓[/] {len(found)} videos in {url} (limit {limit})")
+        else:
+            found = video.expand_url(url, limit)
+        entries += [e for e in found if all(e.video_id != x.video_id for x in entries)]
+    return entries, from_collection
+
+
 @cli.command(name="run", hidden=True)
-@click.argument("url")
-@click.option("--dark", is_flag=True, help="Render the dark theme (default: light).")
+@click.argument("urls", nargs=-1)
+@click.option("--file", "url_file", type=click.Path(exists=True, dir_okay=False, path_type=Path),
+              help="Read video, playlist or channel URLs from a file, one per line.")
+@click.option("--format", "-f", "fmt", type=click.Choice(formats.FORMATS), default=None,
+              help="Output format (default: pdf, or what the -o extension says).")
+@click.option("--style", type=click.Choice(list(llm.STYLES)), default=llm.DEFAULT_STYLE,
+              help="; ".join(f"{k}: {v.summary}" for k, v in llm.STYLES.items()))
+@click.option("--dark", is_flag=True, help="Render the dark theme (default: light). PDF and HTML only.")
 @click.option("--largeText", "--large-text", "large_text", is_flag=True, help="Use larger text (default: normal).")
-@click.option("--output", "-o", type=click.Path(dir_okay=False, path_type=Path), help="Output PDF path.")
-def run(url: str, dark: bool, large_text: bool, output: Path | None) -> None:
-    theme = "dark" if dark else "light"
-    text_size = "large" if large_text else "normal"
+@click.option("--output", "-o", type=click.Path(path_type=Path),
+              help="Output file, or a folder when making several guides.")
+@click.option("--transcribe/--no-transcribe", "whisper", default=None,
+              help="No captions? Transcribe locally with Whisper. Default: describe it and ask first.")
+@click.option("--whisper-model", type=click.Choice(list(transcribe.MODEL_SIZES_MB)), default=transcribe.DEFAULT_MODEL,
+              show_default=True, help="Whisper model size for local transcription.")
+@click.option("--limit", type=click.IntRange(min=1), default=25, show_default=True,
+              help="Most videos to take from a playlist or channel.")
+@click.option("--skip-existing", is_flag=True, help="Skip videos whose output file already exists.")
+@click.option("--yes", "-y", is_flag=True, help="Don't ask before processing a playlist or channel.")
+def run(urls: tuple[str, ...], url_file: Path | None, fmt: str | None, style: str, dark: bool, large_text: bool,
+        output: Path | None, whisper: bool | None, whisper_model: str, limit: int, skip_existing: bool,
+        yes: bool) -> None:
+    all_urls = list(urls) + (_read_url_file(url_file) if url_file else [])
+    if not all_urls:
+        raise click.UsageError("Give at least one YouTube URL (or --file).")
     provider, api_key, model = config.active_settings(config.load_config())
-    video_id = video.extract_video_id(url)
+    entries, from_collection = _collect(all_urls, limit)
+    batch = len(entries) > 1
 
-    ffmpeg = video.ffmpeg_available()
-    if not ffmpeg:
-        err.print(
-            "[yellow]Warning:[/] ffmpeg not found (macOS: `brew install ffmpeg`, "
-            "Debian/Ubuntu: `apt install ffmpeg`). Continuing without screenshots."
-        )
-    with console.status("Fetching video details…"):
-        info = None
+    if fmt is None:
+        fmt = formats.format_for_path(output) if output and not batch else None
+        fmt = fmt or "pdf"
+    opts = Options(
+        provider=provider, api_key=api_key, model=model, theme="dark" if dark else "light",
+        text_size="large" if large_text else "normal", style=style, fmt=fmt, whisper=whisper,
+        whisper_model=whisper_model,
+    )
+
+    if batch and from_collection and not yes and is_interactive():
+        label = config.PROVIDERS[provider]["label"]
+        if not questionary.confirm(
+            f"Make {len(entries)} guides ({fmt}, {style})? Each one is a separate {label} request.", default=True
+        ).ask():
+            raise click.Abort()
+
+    consent = Consent()
+    taken: set[Path] = set()
+    results: list[tuple[video.Entry, Path | None, str | None]] = []
+    for i, entry in enumerate(entries, 1):
+        if batch:
+            console.rule(f"[bold]{i}/{len(entries)}[/] {entry.title or entry.video_id}")
+        # An explicit single-file -o is used as given; otherwise the name comes from the title.
+        target = output if output and not batch and not output.is_dir() else None
+        directory = output if batch or (output and output.is_dir()) else Path.cwd()
         try:
-            info = video.get_video_info(url, video_id)
+            written = make_guide(entry, target, directory, opts, consent, console, err, taken, skip_existing)
+            if written is None:
+                results.append((entry, Path(), "skipped"))
+                continue
+            console.print(f"[bold green]Saved[/] {written[0]}")
+            results.append((entry, written[0], None))
         except YtPdfError as exc:
-            err.print(f"[yellow]Warning:[/] {exc}\nContinuing without screenshots; the title falls back to the video ID.")
-    title = info.title if info else video_id
-    output = output or Path.cwd() / f"{video.filename_stem(title, video_id)}_{theme}.pdf"
-    duration = info.duration if info else None
+            if not batch:
+                raise
+            err.print(f"[bold red]Error:[/] {exc}")
+            results.append((entry, None, str(exc)))
 
-    with console.status("Fetching transcript…"):
-        transcript = video.get_transcript(video_id)
-    console.print(f"[green]✓[/] Transcript ready ({len(transcript.splitlines())} segments)")
+    if batch:
+        _print_summary(results)
+        if any(path is None for _, path, _ in results):
+            sys.exit(1)
 
-    max_shots = MAX_SHOTS if ffmpeg and info and info.stream_url else 0
-    with console.status(f"Writing the guide with {config.PROVIDERS[provider]['label']} / {model}…"):
-        guide, truncated = llm.generate_guide(provider, api_key, model, title, transcript, max_shots)
-    console.print("[green]✓[/] Guide written")
-    if truncated:
-        err.print("[yellow]Warning:[/] the model hit its output limit, so the guide may end early. Try another model.")
 
-    frames: dict[int, str] = {}
-    _, body = pdf.parse_guide(guide)
-    times = pdf.find_screenshot_times(body, duration, MAX_SHOTS) if max_shots else []
-    if times:
-        with Progress(
-            TextColumn("Capturing frames"), BarColumn(), TextColumn("{task.completed}/{task.total}"),
-            TimeElapsedColumn(), console=console, transient=True,
-        ) as progress:
-            task = progress.add_task("frames", total=len(times))
-            frames = video.grab_frames(info, times, on_done=lambda: progress.advance(task))
-        console.print(f"[green]✓[/] Captured {len(frames)}/{len(times)} frames")
-        if not frames:
-            err.print("[yellow]Warning:[/] the video stream could not be read, so the PDF has no screenshots.")
-        elif len(frames) < len(times):
-            err.print("[yellow]Warning:[/] some frames could not be read and were skipped.")
-
-    with console.status("Rendering PDF…"):
-        doc = pdf.build_html(
-            guide, frames, title=title, video_id=video_id, source_url=url, theme=theme,
-            channel=info.channel if info else None, duration=duration, text_size=text_size,
-        )
-        pdf.render_pdf(doc, output, log=console.print)
-    console.print(f"[bold green]Saved[/] {output}")
+def _print_summary(results: list[tuple[video.Entry, Path | None, str | None]]) -> None:
+    done = sum(1 for _, p, note in results if p is not None and note is None)
+    skipped = sum(1 for _, _, note in results if note == "skipped")
+    failed = [(e, note) for e, p, note in results if p is None]
+    console.rule("[bold]Batch finished")
+    console.print(f"[green]{done} saved[/], {skipped} skipped, [red]{len(failed)} failed[/]")
+    for entry, note in failed:
+        console.print(f"  [red]✗[/] {entry.title or entry.video_id}: {note}")
 
 
 # --------------------------------------------------------------------------- auth

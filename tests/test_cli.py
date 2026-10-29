@@ -16,8 +16,8 @@ def captured(monkeypatch, tmp_path):
     monkeypatch.setattr(
         video, "get_video_info", lambda url, vid: video.VideoInfo(video_id=vid, title="Me at the zoo <3")
     )
-    monkeypatch.setattr(video, "get_transcript", lambda vid: "[0s] hello")
-    monkeypatch.setattr(llm, "generate_guide", lambda *a: ("[[TLDR]]\n- a\n[[/TLDR]]\n\n## H\nbody", False))
+    monkeypatch.setattr(video, "fetch_snippets", lambda vid: [(0.0, "hello")])
+    monkeypatch.setattr(llm, "generate_guide", lambda *a, **k: ("[[TLDR]]\n- a\n[[/TLDR]]\n\n## H\nbody", False))
     monkeypatch.setattr(pdf, "render_pdf", lambda doc, out, log=None: seen.update(html=doc, out=out))
     seen["tmp"] = tmp_path
     return seen

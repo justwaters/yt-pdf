@@ -53,3 +53,26 @@ def test_openrouter_default_is_not_the_retired_model():
 def test_prompt_asks_for_a_section_time_under_every_heading_and_for_screenshots():
     assert "{{AT: <seconds>}}" in llm.SYSTEM_PROMPT
     assert "{{SCREENSHOT: <seconds>}}" in llm.SYSTEM_PROMPT
+
+
+def test_every_style_reaches_the_system_prompt(monkeypatch):
+    seen = {}
+
+    def fake(provider, key, model, system, user, max_tokens=0, retries=0):
+        seen.update(system=system, max_tokens=max_tokens)
+        return "text", False
+
+    monkeypatch.setattr(llm, "complete", fake)
+    for name, spec in llm.STYLES.items():
+        llm.generate_guide("openai", "k", "m", "t", "x" * 4_000_000, 20, style=name)
+        assert spec.rules in seen["system"]
+        assert seen["max_tokens"] == spec.max_tokens
+        assert "{" not in seen["system"].replace("{{", "").replace("}}", "")  # no unfilled placeholders
+
+
+def test_summary_is_limited_to_a_few_shots_and_a_small_reply(monkeypatch):
+    seen = {}
+    monkeypatch.setattr(llm, "complete", lambda p, k, m, system, u, max_tokens=0, retries=0: seen.update(s=system) or ("t", False))
+    llm.generate_guide("openai", "k", "m", "t", "x" * 4_000_000, 20, style="summary")
+    assert "at most 3 tags" in seen["s"]
+    assert llm.output_token_budget("x" * 4_000_000, llm.STYLES["summary"].max_tokens) == 4000

@@ -58,6 +58,12 @@ def extract_video_id(url: str) -> str:
     return candidate
 
 
+def filename_stem(title: str, video_id: str) -> str:
+    """The video title as a safe file name (no path separators or odd characters)."""
+    stem = re.sub(r"[^\w.-]+", "-", title, flags=re.UNICODE).strip("-.")[:80].strip("-.")
+    return stem or video_id
+
+
 # --------------------------------------------------------------------------- transcript
 
 

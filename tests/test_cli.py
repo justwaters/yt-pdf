@@ -13,6 +13,9 @@ def captured(monkeypatch, tmp_path):
     monkeypatch.setattr(config, "load_config", lambda: {})
     monkeypatch.setattr(config, "active_settings", lambda cfg: ("openai", "key", "gpt-4o"))
     monkeypatch.setattr(video, "ffmpeg_available", lambda: False)
+    monkeypatch.setattr(
+        video, "get_video_info", lambda url, vid: video.VideoInfo(video_id=vid, title="Me at the zoo <3")
+    )
     monkeypatch.setattr(video, "get_transcript", lambda vid: "[0s] hello")
     monkeypatch.setattr(llm, "generate_guide", lambda *a: ("[[TLDR]]\n- a\n[[/TLDR]]\n\n## H\nbody", False))
     monkeypatch.setattr(pdf, "render_pdf", lambda doc, out, log=None: seen.update(html=doc, out=out))
@@ -43,3 +46,14 @@ def test_flag_combines_with_dark(captured):
 
 def test_flag_is_documented_in_help():
     assert "--largeText" in CliRunner().invoke(cli.cli, ["--help"]).output
+
+
+def test_pdf_title_is_the_video_title_even_without_ffmpeg(captured):
+    html = invoke(captured)
+    assert "<title>Me at the zoo &lt;3</title>" in html
+    assert "<h1>Me at the zoo &lt;3</h1>" in html
+
+
+def test_default_file_name_comes_from_the_title(captured):
+    CliRunner().invoke(cli.cli, [URL])
+    assert captured["out"].name == "Me-at-the-zoo-3_light.pdf"

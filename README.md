@@ -23,6 +23,8 @@ yt-pdf "https://www.youtube.com/watch?v=VIDEO_ID" [--dark] [--largeText] [-o out
 yt-pdf auth               # show provider/model status
 ```
 
+The PDF is titled with the video's title (page header, running title and PDF title), and unless you pass `-o` the file is named after it, e.g. `My-Talk_light.pdf`.
+
 Each section heading and screenshot carries its video time in the left margin, linked to that moment on YouTube. Pages are numbered and carry a running title. The fonts (Source Serif 4 and IBM Plex, SIL Open Font License) ship with the package, so PDFs look the same on macOS and Linux.
 
 Text is a compact size by default; `--largeText` gives the larger size. `--dark` switches to the dark theme.

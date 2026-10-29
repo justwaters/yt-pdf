@@ -54,3 +54,10 @@ def test_video_id_formats(url):
 def test_bad_urls_are_rejected(url):
     with pytest.raises(YtPdfError):
         video.extract_video_id(url)
+
+
+def test_filename_stem_uses_the_title_and_stays_safe():
+    assert video.filename_stem("Let's build GPT: from scratch, in code", "abcdefghijk") == "Let-s-build-GPT-from-scratch-in-code"
+    assert video.filename_stem("../../etc/passwd", "abcdefghijk") == "etc-passwd"
+    assert video.filename_stem("???", "abcdefghijk") == "abcdefghijk"
+    assert len(video.filename_stem("x" * 300, "abcdefghijk")) <= 80

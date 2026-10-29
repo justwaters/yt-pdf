@@ -56,28 +56,28 @@ def run(url: str, dark: bool, large_text: bool, output: Path | None) -> None:
     text_size = "large" if large_text else "normal"
     provider, api_key, model = config.active_settings(config.load_config())
     video_id = video.extract_video_id(url)
-    output = output or Path.cwd() / f"{video_id}_{theme}.pdf"
 
+    ffmpeg = video.ffmpeg_available()
+    if not ffmpeg:
+        err.print(
+            "[yellow]Warning:[/] ffmpeg not found (macOS: `brew install ffmpeg`, "
+            "Debian/Ubuntu: `apt install ffmpeg`). Continuing without screenshots."
+        )
     with console.status("Fetching video details…"):
         info = None
-        if video.ffmpeg_available():
-            try:
-                info = video.get_video_info(url, video_id)
-            except YtPdfError as exc:
-                err.print(f"[yellow]Warning:[/] {exc}\nContinuing without screenshots.")
-        else:
-            err.print(
-                "[yellow]Warning:[/] ffmpeg not found (macOS: `brew install ffmpeg`, "
-                "Debian/Ubuntu: `apt install ffmpeg`). Continuing without screenshots."
-            )
+        try:
+            info = video.get_video_info(url, video_id)
+        except YtPdfError as exc:
+            err.print(f"[yellow]Warning:[/] {exc}\nContinuing without screenshots; the title falls back to the video ID.")
     title = info.title if info else video_id
+    output = output or Path.cwd() / f"{video.filename_stem(title, video_id)}_{theme}.pdf"
     duration = info.duration if info else None
 
     with console.status("Fetching transcript…"):
         transcript = video.get_transcript(video_id)
     console.print(f"[green]✓[/] Transcript ready ({len(transcript.splitlines())} segments)")
 
-    max_shots = MAX_SHOTS if info and info.stream_url else 0
+    max_shots = MAX_SHOTS if ffmpeg and info and info.stream_url else 0
     with console.status(f"Writing the guide with {config.PROVIDERS[provider]['label']} / {model}…"):
         guide, truncated = llm.generate_guide(provider, api_key, model, title, transcript, max_shots)
     console.print("[green]✓[/] Guide written")

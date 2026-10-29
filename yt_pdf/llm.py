@@ -12,6 +12,7 @@ OPENAI_COMPATIBLE_BASE_URLS: dict[str, str | None] = {
     "openai": None,
     "openrouter": "https://openrouter.ai/api/v1",
     "nvidia": "https://integrate.api.nvidia.com/v1",
+    "custom": None,  # the user's own URL, passed per call
 }
 
 MAX_OUTPUT_TOKENS = 12000
@@ -117,6 +118,8 @@ def build_user_prompt(title: str, transcript: str) -> str:
 
 
 def _translate(exc: Exception, provider: str) -> YtPdfError:
+    if provider == "custom":
+        provider = "custom endpoint"
     status = getattr(exc, "status_code", None) or getattr(exc, "code", None)
     name = type(exc).__name__
     if status in (401, 403) or "Authentication" in name or "PermissionDenied" in name:
@@ -158,11 +161,11 @@ def _call_anthropic(api_key: str, model: str, system: str, user: str, max_tokens
 
 
 def _call_openai_compatible(
-    provider: str, api_key: str, model: str, system: str, user: str, max_tokens: int
+    provider: str, api_key: str, model: str, system: str, user: str, max_tokens: int, base_url: str | None = None
 ) -> Reply:
     import openai
 
-    client = openai.OpenAI(api_key=api_key, base_url=OPENAI_COMPATIBLE_BASE_URLS[provider])
+    client = openai.OpenAI(api_key=api_key, base_url=base_url or OPENAI_COMPATIBLE_BASE_URLS[provider])
     # OpenAI itself prefers max_completion_tokens; the compatible hosts still expect max_tokens.
     limit_arg = "max_completion_tokens" if provider == "openai" else "max_tokens"
     resp = client.chat.completions.create(
@@ -188,14 +191,16 @@ def _call_gemini(api_key: str, model: str, system: str, user: str, max_tokens: i
     return resp.text or "", "MAX_TOKENS" in reason
 
 
-def _dispatch(provider: str) -> Callable[[str, str, str, str, int], Reply]:
+def _dispatch(provider: str, base_url: str | None = None) -> Callable[[str, str, str, str, int], Reply]:
     if provider == "anthropic":
         return _call_anthropic
     if provider == "gemini":
         return _call_gemini
     if provider in OPENAI_COMPATIBLE_BASE_URLS:
+        if provider == "custom" and not base_url:
+            raise YtPdfError("No URL is set for the custom endpoint. Run `yt-pdf auth login`.")
         return lambda key, model, system, user, n: _call_openai_compatible(
-            provider, key, model, system, user, n
+            provider, key, model, system, user, n, base_url
         )
     raise YtPdfError(f"Unknown provider: {provider}")
 
@@ -208,9 +213,10 @@ def complete(
     user: str,
     max_tokens: int = MAX_OUTPUT_TOKENS,
     retries: int = RATE_LIMIT_RETRIES,
+    base_url: str | None = None,
 ) -> Reply:
     """One chat completion, retrying rate limits with backoff."""
-    call = _dispatch(provider)
+    call = _dispatch(provider, base_url)
     for attempt in range(retries + 1):
         try:
             return call(api_key, model, system, user, max_tokens)
@@ -224,9 +230,22 @@ def complete(
     raise YtPdfError(f"{provider}: gave up after repeated rate limits.")  # pragma: no cover
 
 
-def verify_key(provider: str, api_key: str, model: str) -> None:
+def verify_key(provider: str, api_key: str, model: str, base_url: str | None = None) -> None:
     """Minimal request to prove the key works. Raises YtPdfError otherwise."""
-    complete(provider, api_key, model, "Reply with the single word OK.", "ping", max_tokens=16, retries=0)
+    complete(
+        provider, api_key, model, "Reply with the single word OK.", "ping", max_tokens=16, retries=0, base_url=base_url
+    )
+
+
+def list_models(api_key: str, base_url: str) -> list[str]:
+    """Model ids an OpenAI-compatible server offers, or [] when it has no (readable) model list."""
+    import openai
+
+    try:
+        client = openai.OpenAI(api_key=api_key, base_url=base_url, timeout=10, max_retries=0)
+        return sorted(m.id for m in client.models.list())
+    except Exception:
+        return []
 
 
 def generate_guide(
@@ -237,6 +256,7 @@ def generate_guide(
     transcript: str,
     max_shots: int,
     style: str = DEFAULT_STYLE,
+    base_url: str | None = None,
 ) -> tuple[str, bool]:
     """Return (markdown guide, truncated). Truncated means the reply still hit the token cap."""
     spec = STYLES[style]
@@ -245,10 +265,10 @@ def generate_guide(
     user = build_user_prompt(title, transcript)
     cap = spec.max_tokens
     budget = output_token_budget(transcript, cap)
-    text, truncated = complete(provider, api_key, model, system, user, max_tokens=budget)
+    text, truncated = complete(provider, api_key, model, system, user, max_tokens=budget, base_url=base_url)
     if truncated and budget < cap:
         # The size estimate was too tight for this model (verbose or reasoning models); retry once at the cap.
-        text, truncated = complete(provider, api_key, model, system, user, max_tokens=cap)
+        text, truncated = complete(provider, api_key, model, system, user, max_tokens=cap, base_url=base_url)
     text = text.strip()
     if not text:
         raise YtPdfError(f"{provider} returned an empty response. Try a different model.")

@@ -27,6 +27,7 @@ class Options:
     fmt: str = "pdf"
     whisper: bool | None = None  # True: agreed up front, False: never, None: ask
     whisper_model: str = transcribe.DEFAULT_MODEL
+    base_url: str | None = None  # the custom OpenAI-compatible endpoint, when that is the provider
 
 
 @dataclass
@@ -149,7 +150,8 @@ def make_guide(
     max_shots = min(MAX_SHOTS, style.max_shots) if ffmpeg and info and info.stream_url else 0
     with console.status(f"Writing the guide with {config.PROVIDERS[opts.provider]['label']} / {opts.model}…"):
         guide, truncated = llm.generate_guide(
-            opts.provider, opts.api_key, opts.model, title, transcript, max_shots, style=opts.style
+            opts.provider, opts.api_key, opts.model, title, transcript, max_shots, style=opts.style,
+            base_url=opts.base_url,
         )
     console.print("[green]✓[/] Guide written")
     if truncated:

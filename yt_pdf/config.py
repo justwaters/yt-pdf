@@ -7,6 +7,7 @@ import os
 import tempfile
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 from .errors import YtPdfError
 
@@ -41,7 +42,39 @@ PROVIDERS: dict[str, dict[str, Any]] = {
         "default_model": "gemini-2.5-flash",
         "models": ["gemini-2.5-flash", "gemini-2.5-pro"],
     },
+    # Any server that speaks the OpenAI chat API: Ollama, LM Studio, vLLM, LiteLLM, Together, Groq, ...
+    # It has no default model (that depends on the server) and its URL is stored with the key.
+    "custom": {
+        "label": "OpenAI-compatible (custom URL)",
+        "default_model": None,
+        "models": [],
+    },
 }
+
+CUSTOM = "custom"
+# Local servers usually need no key, but the OpenAI client insists on a non-empty one.
+NO_KEY = "no-key"
+EXAMPLE_URL = "http://localhost:11434/v1"
+_LOCAL_HOSTS = {"localhost", "127.0.0.1", "::1", "0.0.0.0"}
+
+
+def normalize_base_url(url: str) -> str:
+    """The API base URL, validated: http(s) with a host, no trailing slash, no `/chat/completions`."""
+    url = url.strip()
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https") or not parsed.hostname:
+        raise YtPdfError(f"{url!r} is not a valid URL. Use something like {EXAMPLE_URL} or https://api.example.com/v1")
+    url = url.rstrip("/")
+    for suffix in ("/chat/completions", "/completions"):
+        if url.endswith(suffix):
+            url = url[: -len(suffix)]
+    return url
+
+
+def is_insecure_remote(url: str) -> bool:
+    """Plain http to a host that is not this computer: the API key would cross the network unencrypted."""
+    parsed = urlparse(url)
+    return parsed.scheme == "http" and (parsed.hostname or "") not in _LOCAL_HOSTS
 
 
 def config_dir() -> Path:
@@ -106,9 +139,21 @@ def mask_key(key: str) -> str:
     return f"{key[:7]}...{key[-4:]}"
 
 
-def set_provider(cfg: dict[str, Any], provider: str, api_key: str, model: str) -> None:
-    cfg["providers"][provider] = {"api_key": api_key, "active_model": model}
+def set_provider(
+    cfg: dict[str, Any], provider: str, api_key: str, model: str, base_url: str | None = None
+) -> None:
+    entry = {"api_key": api_key, "active_model": model}
+    if base_url:
+        entry["base_url"] = base_url
+    cfg["providers"][provider] = entry
     cfg["active_provider"] = provider
+
+
+def active_base_url(cfg: dict[str, Any]) -> str | None:
+    """The custom endpoint's URL when it is the active provider, else None."""
+    if cfg.get("active_provider") != CUSTOM:
+        return None
+    return (cfg["providers"].get(CUSTOM) or {}).get("base_url")
 
 
 def active_settings(cfg: dict[str, Any]) -> tuple[str, str, str]:
@@ -117,5 +162,9 @@ def active_settings(cfg: dict[str, Any]) -> tuple[str, str, str]:
     entry = cfg["providers"].get(provider) if provider else None
     if provider not in PROVIDERS or not entry or not entry.get("api_key"):
         raise YtPdfError("No active provider with an API key. Run `yt-pdf auth login` first.")
+    if provider == CUSTOM and not entry.get("base_url"):
+        raise YtPdfError("The custom endpoint has no URL saved. Run `yt-pdf auth login` again.")
     model = entry.get("active_model") or PROVIDERS[provider]["default_model"]
+    if not model:
+        raise YtPdfError("No model chosen for this provider. Run `yt-pdf model`.")
     return provider, entry["api_key"], model

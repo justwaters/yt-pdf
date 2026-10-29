@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import shutil
+import subprocess
 import sys
 from pathlib import Path
 
@@ -10,7 +12,7 @@ import questionary
 from rich.console import Console
 from rich.table import Table
 
-from . import __version__, config, formats, llm, transcribe, video
+from . import __version__, config, formats, llm, transcribe, updater, video
 from .errors import YtPdfError
 from .pipeline import Consent, Options, default_output_path, is_interactive, make_guide
 
@@ -41,6 +43,7 @@ def cli() -> None:
     yt-pdf auth                            show provider status
     yt-pdf auth login                      add or switch an API key
     yt-pdf model                           choose the model
+    yt-pdf update                          update to the latest release
     """
 
 
@@ -97,7 +100,8 @@ def run(urls: tuple[str, ...], url_file: Path | None, fmt: str | None, style: st
     all_urls = list(urls) + (_read_url_file(url_file) if url_file else [])
     if not all_urls:
         raise click.UsageError("Give at least one YouTube URL (or --file).")
-    provider, api_key, model = config.active_settings(config.load_config())
+    cfg = config.load_config()
+    provider, api_key, model = config.active_settings(cfg)
     entries, from_collection = _collect(all_urls, limit)
     batch = len(entries) > 1
 
@@ -107,7 +111,7 @@ def run(urls: tuple[str, ...], url_file: Path | None, fmt: str | None, style: st
     opts = Options(
         provider=provider, api_key=api_key, model=model, theme="dark" if dark else "light",
         text_size="large" if large_text else "normal", style=style, fmt=fmt, whisper=whisper,
-        whisper_model=whisper_model,
+        whisper_model=whisper_model, base_url=config.active_base_url(cfg),
     )
 
     if batch and from_collection and not yes and is_interactive():
@@ -170,6 +174,8 @@ def auth(ctx: click.Context) -> None:
         entry = cfg["providers"].get(active, {})
         model = entry.get("active_model") or config.PROVIDERS[active]["default_model"]
         console.print(f"Active provider: [bold]{config.PROVIDERS[active]['label']}[/]")
+        if entry.get("base_url"):
+            console.print(f"Endpoint:        [bold]{entry['base_url']}[/]")
         console.print(f"Active model:    [bold]{model}[/]\n")
     else:
         console.print("[yellow]No active provider.[/] Run `yt-pdf auth login`.\n")
@@ -182,10 +188,32 @@ def auth(ctx: click.Context) -> None:
         key = entry.get("api_key")
         label = f"{meta['label']} *" if name == active else meta["label"]
         if key:
-            table.add_row(label, "[green]Configured[/]", config.mask_key(key), entry.get("active_model", "-"))
+            model_cell = entry.get("active_model", "-")
+            if entry.get("base_url"):
+                model_cell += f"  ({entry['base_url']})"
+            table.add_row(label, "[green]Configured[/]", config.mask_key(key), model_cell)
         else:
             table.add_row(label, "[dim]Not Configured[/]", "-", "-")
     console.print(table)
+
+
+def _pick_model(models: list[str], current: str | None = None) -> str:
+    """Choose from `models`, or type a name. With no list, just ask for the name."""
+    if models:
+        choices = [questionary.Choice(m + ("  (current)" if m == current else ""), value=m) for m in models]
+        choices.append(questionary.Choice(CUSTOM_MODEL, value=CUSTOM_MODEL))
+        picked = questionary.select("Model:", choices=choices).ask()
+        if picked is None:
+            raise click.Abort()
+        if picked != CUSTOM_MODEL:
+            return picked
+    picked = questionary.text("Model name:", default=current or "").ask()
+    if picked is None:
+        raise click.Abort()
+    picked = picked.strip()
+    if not picked:
+        raise YtPdfError("No model name entered.")
+    return picked
 
 
 @auth.command()
@@ -196,21 +224,46 @@ def login() -> None:
     if choice is None:
         raise click.Abort()
     provider = labels[choice]
-    key = questionary.password(f"{choice} API key:").ask()
+    cfg = config.load_config()
+    base_url = None
+    if provider == config.CUSTOM:
+        saved = (cfg["providers"].get(provider) or {}).get("base_url") or ""
+        raw = questionary.text(
+            f"API base URL (e.g. {config.EXAMPLE_URL} for Ollama):", default=saved
+        ).ask()
+        if raw is None:
+            raise click.Abort()
+        base_url = config.normalize_base_url(raw)
+        if config.is_insecure_remote(base_url):
+            err.print(
+                f"[yellow]Warning:[/] {base_url} is plain http to another machine, so the API key and the "
+                "video transcript will cross the network unencrypted."
+            )
+        key = questionary.password("API key (leave empty if the server needs none):").ask()
+    else:
+        key = questionary.password(f"{choice} API key:").ask()
     if key is None:
         raise click.Abort()
     key = key.strip()
-    if not key:
+    if not key and provider != config.CUSTOM:
         raise YtPdfError("No API key entered.")
+    key = key or config.NO_KEY
 
-    model = config.PROVIDERS[provider]["default_model"]
-    with console.status(f"Verifying key with {model}…"):
-        llm.verify_key(provider, key, model)
+    if provider == config.CUSTOM:
+        with console.status("Asking the server for its models…"):
+            available = llm.list_models(key, base_url)
+        model = _pick_model(available)
+    else:
+        model = config.PROVIDERS[provider]["default_model"]
+    with console.status(f"Verifying with {model}…"):
+        llm.verify_key(provider, key, model, base_url)
 
-    cfg = config.load_config()
-    config.set_provider(cfg, provider, key, model)
+    config.set_provider(cfg, provider, key, model, base_url)
     config.save_config(cfg)
-    console.print(f"[green]✓[/] {choice} configured ({config.mask_key(key)}), model [bold]{model}[/].")
+    shown = "no key" if key == config.NO_KEY else config.mask_key(key)
+    console.print(f"[green]✓[/] {choice} configured ({shown}), model [bold]{model}[/].")
+    if base_url:
+        console.print(f"Endpoint: {base_url}")
     console.print(f"Saved to {config.config_path()}")
 
 
@@ -221,23 +274,57 @@ def login() -> None:
 def model() -> None:
     """Choose the model for the active provider."""
     cfg = config.load_config()
-    provider, _, current = config.active_settings(cfg)
+    provider, key, current = config.active_settings(cfg)
     meta = config.PROVIDERS[provider]
-    choices = [questionary.Choice(m + ("  (current)" if m == current else ""), value=m) for m in meta["models"]]
-    choices.append(questionary.Choice(CUSTOM_MODEL, value=CUSTOM_MODEL))
-    picked = questionary.select(f"Model for {meta['label']}:", choices=choices).ask()
-    if picked is None:
-        raise click.Abort()
-    if picked == CUSTOM_MODEL:
-        picked = questionary.text("Model name:").ask()
+    if provider == config.CUSTOM:
+        with console.status("Asking the server for its models…"):
+            available = llm.list_models(key, config.active_base_url(cfg))
+        picked = _pick_model(available, current)
+    else:
+        choices = [questionary.Choice(m + ("  (current)" if m == current else ""), value=m) for m in meta["models"]]
+        choices.append(questionary.Choice(CUSTOM_MODEL, value=CUSTOM_MODEL))
+        picked = questionary.select(f"Model for {meta['label']}:", choices=choices).ask()
         if picked is None:
             raise click.Abort()
-        picked = picked.strip()
-        if not picked:
-            raise YtPdfError("No model name entered.")
+        if picked == CUSTOM_MODEL:
+            picked = questionary.text("Model name:").ask()
+            if picked is None:
+                raise click.Abort()
+            picked = picked.strip()
+            if not picked:
+                raise YtPdfError("No model name entered.")
     cfg["providers"][provider]["active_model"] = picked
     config.save_config(cfg)
     console.print(f"[green]✓[/] {meta['label']} model set to [bold]{picked}[/]")
+
+
+# --------------------------------------------------------------------------- update
+
+
+@cli.command()
+@click.option("--check", is_flag=True, help="Only say whether a newer version exists.")
+def update(check: bool) -> None:
+    """Update yt-pdf to the latest release."""
+    latest = updater.latest_version()
+    if updater.parse_version(latest) <= updater.parse_version(__version__):
+        console.print(f"[green]✓[/] yt-pdf {__version__} is up to date.")
+        return
+    console.print(f"yt-pdf {__version__} → [bold]{latest}[/] is available.")
+    method = updater.install_method()
+    command = updater.upgrade_command(method, latest)
+    if method == "dev":
+        console.print("This is a development checkout: `git pull` and `pip install -e .` to update it.")
+        return
+    if check:
+        console.print(f"Run `yt-pdf update` to install it ([dim]{' '.join(command)}[/dim]).")
+        return
+    if shutil.which(command[0]) is None:
+        raise YtPdfError(f"`{command[0]}` was not found. Update it yourself with: {' '.join(command)}")
+    console.print(f"Updating with [bold]{method}[/]: [dim]{' '.join(command)}[/]")
+    code = subprocess.run(command).returncode
+    if code != 0:
+        raise YtPdfError(f"The update command failed (exit {code}). Run it yourself: {' '.join(command)}")
+    console.print(f"[green]✓[/] Updated. Run `yt-pdf --version` to confirm.")
 
 
 # --------------------------------------------------------------------------- main

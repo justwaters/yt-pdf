@@ -70,6 +70,21 @@ If a video has no captions, yt-pdf says what it would do and asks first: it can 
 - Without a terminal and without `--transcribe`, yt-pdf stops instead of asking.
 - To install the package yourself: `pipx inject yt-pdf faster-whisper` or `pip install "yt-pdf[whisper]"`.
 
-Providers: OpenAI, Anthropic, OpenRouter, Nvidia NIM, Google Gemini. Config lives in `~/.config/yt-pdf/config.json`.
+Providers: OpenAI, Anthropic, OpenRouter, Nvidia NIM, Google Gemini, and any OpenAI-compatible server. Config lives in `~/.config/yt-pdf/config.json`.
+
+### Your own OpenAI-compatible endpoint
+
+Choose **OpenAI-compatible (custom URL)** in `yt-pdf auth login` to use Ollama, LM Studio, vLLM, LiteLLM, Groq, Together or anything else that serves the OpenAI chat API. You give it the base URL (for Ollama `http://localhost:11434/v1`), an API key (leave it empty if the server needs none) and a model. yt-pdf asks the server for its model list so you can pick one, then sends a one-token test request before saving. `yt-pdf model` switches models later and `yt-pdf auth` shows the endpoint.
+
+Plain `http://` to another machine sends the key and the video transcript unencrypted, and yt-pdf warns you when you set that up. Local models are often smaller than the hosted ones; if guides come out cut short or malformed, try `--style summary` or a larger model.
+
+### Updating
+
+```sh
+yt-pdf update            # install the latest release
+yt-pdf update --check    # only say whether there is one
+```
+
+It detects how yt-pdf was installed and runs the matching command: `brew upgrade justwaters/tap/yt-pdf` for Homebrew, a pinned reinstall for pipx, uv and pip. A development checkout is left alone (it tells you to `git pull`).
 
 Without `ffmpeg` (or if `yt-dlp` can't read the stream) the PDF is still produced, just without screenshots.

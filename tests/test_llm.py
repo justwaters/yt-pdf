@@ -17,7 +17,7 @@ def test_short_video_requests_less_than_the_maximum():
 
 
 def _fake_complete(replies, calls):
-    def fake(provider, key, model, system, user, max_tokens=0, retries=0):
+    def fake(provider, key, model, system, user, max_tokens=0, retries=0, base_url=None):
         calls.append(max_tokens)
         return replies[len(calls) - 1]
 
@@ -42,6 +42,8 @@ def test_no_retry_when_already_at_the_cap(monkeypatch):
 
 def test_default_models_are_in_the_curated_lists():
     for name, meta in config.PROVIDERS.items():
+        if name == config.CUSTOM:
+            continue  # its model depends on the server the user points it at
         assert meta["default_model"] in meta["models"], name
 
 
@@ -58,7 +60,7 @@ def test_prompt_asks_for_a_section_time_under_every_heading_and_for_screenshots(
 def test_every_style_reaches_the_system_prompt(monkeypatch):
     seen = {}
 
-    def fake(provider, key, model, system, user, max_tokens=0, retries=0):
+    def fake(provider, key, model, system, user, max_tokens=0, retries=0, base_url=None):
         seen.update(system=system, max_tokens=max_tokens)
         return "text", False
 
@@ -72,7 +74,7 @@ def test_every_style_reaches_the_system_prompt(monkeypatch):
 
 def test_summary_is_limited_to_a_few_shots_and_a_small_reply(monkeypatch):
     seen = {}
-    monkeypatch.setattr(llm, "complete", lambda p, k, m, system, u, max_tokens=0, retries=0: seen.update(s=system) or ("t", False))
+    monkeypatch.setattr(llm, "complete", lambda p, k, m, system, u, max_tokens=0, retries=0, base_url=None: seen.update(s=system) or ("t", False))
     llm.generate_guide("openai", "k", "m", "t", "x" * 4_000_000, 20, style="summary")
     assert "at most 3 tags" in seen["s"]
     assert llm.output_token_budget("x" * 4_000_000, llm.STYLES["summary"].max_tokens) == 4000

@@ -58,6 +58,32 @@ def extract_video_id(url: str) -> str:
     return candidate
 
 
+_SMALL_WORDS = frozenset(
+    "a an and as at but by en for if in nor of off on or per so the to up via vs vs. yet".split()
+)
+
+
+def tidy_title(title: str) -> str:
+    """Title-case a title that was typed entirely in lowercase; leave any other title alone.
+
+    A title with a capital in it ("iPhone 17 Review", "NASA's plan") was capitalised on purpose.
+    """
+    if not title or any(c.isupper() for c in title):
+        return title
+    words = title.split(" ")
+    last = max((i for i, w in enumerate(words) if w), default=0)
+    out = []
+    for i, word in enumerate(words):
+        # Leave anything with digits, dots or slashes (versions, domains, paths) as typed.
+        if not word or any(c.isdigit() or c in "./_@#" for c in word):
+            out.append(word)
+        elif i not in (0, last) and word in _SMALL_WORDS:
+            out.append(word)
+        else:
+            out.append("-".join(p[:1].upper() + p[1:] for p in word.split("-")))
+    return " ".join(out)
+
+
 def filename_stem(title: str, video_id: str) -> str:
     """The video title as a safe file name (no path separators or odd characters)."""
     stem = re.sub(r"[^\w.-]+", "-", title, flags=re.UNICODE).strip("-.")[:80].strip("-.")
@@ -104,7 +130,7 @@ def expand_url(url: str, limit: int) -> list[Entry]:
     for item in info.get("entries") or []:
         vid = (item or {}).get("id")
         if vid and _ID_RE.match(vid) and all(e.video_id != vid for e in entries):
-            entries.append(Entry(vid, f"https://www.youtube.com/watch?v={vid}", item.get("title")))
+            entries.append(Entry(vid, f"https://www.youtube.com/watch?v={vid}", tidy_title(item.get("title") or "") or None))
     if not entries:
         raise YtPdfError("No videos were found at that playlist or channel.")
     return entries[:limit]
@@ -224,7 +250,7 @@ def get_video_info(url: str, video_id: str) -> VideoInfo:
     headers = {**(info.get("http_headers") or {}), **(fmt.get("http_headers") or {})}
     return VideoInfo(
         video_id=video_id,
-        title=info.get("title") or video_id,
+        title=tidy_title(info.get("title") or video_id),
         duration=int(info["duration"]) if info.get("duration") else None,
         channel=info.get("channel") or info.get("uploader"),
         stream_url=fmt.get("url"),

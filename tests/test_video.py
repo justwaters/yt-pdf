@@ -93,3 +93,20 @@ def test_missing_captions_is_a_distinct_error(monkeypatch):
 def test_format_transcript_groups_into_chunks():
     text = video.format_transcript([(0.0, "a"), (5.0, "b"), (25.0, "c")])
     assert text == "[0s] a b\n[25s] c"
+
+
+def test_tidy_title_capitalises_all_lowercase_titles():
+    from yt_pdf.video import tidy_title
+
+    assert tidy_title("it shouldn't be able to run models this big") == "It Shouldn't Be Able to Run Models This Big"
+    assert tidy_title("what is a self-hosted llm") == "What Is a Self-Hosted Llm"
+    assert tidy_title("a guide to python 3.13 and docker.com") == "A Guide to Python 3.13 and docker.com"
+
+
+def test_tidy_title_leaves_deliberate_capitals_alone():
+    from yt_pdf.video import tidy_title
+
+    for title in ("iPhone 17 review", "NASA's new plan", "How I Built It", ""):
+        assert tidy_title(title) == title
+
+

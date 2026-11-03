@@ -23,7 +23,7 @@ yt-pdf "https://www.youtube.com/watch?v=VIDEO_ID" [--style S] [--format F] [--da
 yt-pdf auth               # show provider/model status
 ```
 
-The PDF is titled with the video's title (page header, running title and PDF title), and unless you pass `-o` the file is named after it, e.g. `My-Talk_light.pdf`.
+The PDF is titled with the video's title (page header, running title and PDF title), and unless you pass `-o` the file is named after it, e.g. `My-Talk_light.pdf`. A title typed entirely in lowercase on YouTube is title-cased (`it shouldn't be able to run models` becomes `It Shouldn't Be Able to Run Models`); titles that already have capitals are left as written.
 
 Each section heading and screenshot carries its video time in the left margin, linked to that moment on YouTube. Pages are numbered and carry a running title. The fonts (Source Serif 4 and IBM Plex, SIL Open Font License) ship with the package, so PDFs look the same on macOS and Linux.
 

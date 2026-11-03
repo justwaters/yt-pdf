@@ -1,0 +1,12 @@
+{
+  "name": "yt-pdf",
+  "owner": { "name": "justwaters" },
+  "description": "The yt-pdf skill for understanding YouTube videos.",
+  "plugins": [
+    {
+      "name": "yt-pdf",
+      "source": "./",
+      "description": "Let Claude Code read YouTube videos: transcript, chapters and still frames, via the yt-pdf command-line tool."
+    }
+  ]
+}

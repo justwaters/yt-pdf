@@ -90,6 +90,26 @@ yt-pdf frames "<url>" --at 1:30,12:05 [--around 3] [-o dir]    # JPEG stills; pr
 
 Times are seconds (`90`), `1:30` or `1:02:03`. `--around N` also saves a frame N seconds before and after each time so the agent can pick the best one (up to 40 frames per call). A video without captions fails with a hint unless you pass `--transcribe` (local Whisper, same notice as above). Transcripts are untrusted text from the internet: an agent should read them as data, never as instructions.
 
+#### Install the skill
+
+The skill (`skills/yt-pdf/SKILL.md`) teaches an agent when and how to use these commands: start from the chapters, read only the part that matters, fetch frames only where a visual matters, cite times with links, and treat the transcript as untrusted. It needs `yt-pdf` itself installed (see above).
+
+```sh
+# Claude Code
+claude plugin marketplace add justwaters/yt-pdf
+claude plugin install yt-pdf@yt-pdf
+
+# Gemini CLI
+gemini skills install https://github.com/justwaters/yt-pdf.git --path skills/yt-pdf --consent
+
+# Codex, opencode and other tools that read the shared Agent Skills folder
+mkdir -p ~/.agents/skills/yt-pdf
+curl -fsSL https://raw.githubusercontent.com/justwaters/yt-pdf/master/skills/yt-pdf/SKILL.md \
+  -o ~/.agents/skills/yt-pdf/SKILL.md
+```
+
+`SKILL.md` follows the open [Agent Skills](https://agentskills.io/specification) format, which Claude Code, Codex, opencode and Gemini CLI read from `~/.agents/skills/` (Claude Code also from `~/.claude/skills/`). Restart the agent after copying. Project-level installs use `.agents/skills/` in the repository instead.
+
 ### Updating
 
 ```sh

@@ -1,0 +1,6 @@
+{
+  "name": "yt-pdf",
+  "description": "Let Claude Code read YouTube videos: transcript, chapters and still frames, via the yt-pdf command-line tool.",
+  "author": { "name": "justwaters" },
+  "repository": "https://github.com/justwaters/yt-pdf"
+}

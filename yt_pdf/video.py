@@ -36,6 +36,7 @@ class VideoInfo:
     channel: str | None = None
     stream_url: str | None = None
     headers: dict[str, str] = field(default_factory=dict)
+    chapters: list[tuple[int, str]] = field(default_factory=list)  # (start seconds, title)
 
 
 def extract_video_id(url: str) -> str:
@@ -200,9 +201,9 @@ def fetch_snippets(video_id: str) -> list[tuple[float, str]]:
         raise YtPdfError(f"Could not fetch the transcript: {exc}") from exc
 
 
-def format_transcript(snippets: list[tuple[float, str]]) -> str:
-    """`[123s] text` lines, grouped into ~20 second chunks to save tokens."""
-    lines: list[str] = []
+def chunk_transcript(snippets: list[tuple[float, str]]) -> list[tuple[int, str]]:
+    """(start second, text) chunks of about 20 seconds each, to save tokens."""
+    chunks: list[tuple[int, str]] = []
     chunk_start: float | None = None
     buf: list[str] = []
     for start, text in snippets:
@@ -212,14 +213,19 @@ def format_transcript(snippets: list[tuple[float, str]]) -> str:
         if chunk_start is None:
             chunk_start = start
         elif start - chunk_start >= TRANSCRIPT_CHUNK_SECONDS:
-            lines.append(f"[{int(chunk_start)}s] {' '.join(buf)}")
+            chunks.append((int(chunk_start), " ".join(buf)))
             chunk_start, buf = start, []
         buf.append(text)
     if buf and chunk_start is not None:
-        lines.append(f"[{int(chunk_start)}s] {' '.join(buf)}")
-    if not lines:
+        chunks.append((int(chunk_start), " ".join(buf)))
+    if not chunks:
         raise YtPdfError("The transcript was empty.")
-    return "\n".join(lines)
+    return chunks
+
+
+def format_transcript(snippets: list[tuple[float, str]]) -> str:
+    """`[123s] text` lines, grouped into ~20 second chunks to save tokens."""
+    return "\n".join(f"[{start}s] {text}" for start, text in chunk_transcript(snippets))
 
 
 def get_transcript(video_id: str) -> str:
@@ -255,6 +261,10 @@ def get_video_info(url: str, video_id: str) -> VideoInfo:
         channel=info.get("channel") or info.get("uploader"),
         stream_url=fmt.get("url"),
         headers=headers,
+        chapters=[
+            (int(c.get("start_time") or 0), str(c.get("title") or "").strip())
+            for c in (info.get("chapters") or [])
+        ],
     )
 
 

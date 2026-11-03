@@ -64,11 +64,11 @@ def _transcript(
         with console.status("Fetching transcript…"):
             snippets = video.fetch_snippets(entry.video_id)
     except NoCaptionsError as exc:
-        snippets = _whisper_fallback(exc, entry, info, opts, consent, console, err)
+        snippets = whisper_fallback(exc, entry, info, opts, consent, console, err)
     return video.format_transcript(snippets)
 
 
-def _whisper_fallback(
+def whisper_fallback(
     exc: NoCaptionsError, entry: video.Entry, info: video.VideoInfo | None, opts: Options,
     consent: Consent, console: Console, err: Console,
 ) -> list[tuple[float, str]]:
